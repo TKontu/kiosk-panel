@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Tell Chromium this page is already dark. Without it the kiosk's
+     --force-dark-mode / WebContentsForceDark filter dims the artwork. -->
+<meta name="color-scheme" content="dark">
+<title>Photo</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    width: 100%; height: 100%;
+    margin: 0; padding: 0;
+    overflow: hidden;
+    background: #000;
+  }
+  /* The panel is 1080x1920 portrait. `cover` fills it edge to edge; a source
+     with a different aspect is centre-cropped rather than letterboxed.
+     Swap to `contain` if you'd rather see the whole image with black bars. */
+  img {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+    /* belt and braces: force-dark never touches an image we opt out of */
+    forced-color-adjust: none;
+  }
+</style>
+</head>
+<body>
+  <img src="media/image.jpg" alt="">
+</body>
+</html>

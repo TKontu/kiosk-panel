@@ -1,0 +1,83 @@
+[
+  {
+    "id": "wallpanel_tab",
+    "type": "tab",
+    "label": "Wall Panel Control",
+    "disabled": false,
+    "info": "Maps a Zigbee remote to wall-panel INTENTS.
+
+On import, set this flow's zigbee2mqtt-in topic to YOUR remote's IEEE
+address and point both MQTT nodes at your own authenticated broker config.\n\n  arrow_right_click -> wallpanel/command = next\n  arrow_left_click  -> wallpanel/command = prev\n  off               -> wallpanel/command = blank\n  on                -> wallpanel/override = \"\" (retained) - resume schedule\n\nThis flow deliberately contains NO view names. The shell (views.js) owns the\nview list and resolves next/prev/blank against it at runtime, so adding a view\nnever requires touching or re-importing this flow.\n\n'on' clears the retained override directly rather than going through the\nshell, so resuming the schedule still works while the panel is offline."
+  },
+  {
+    "id": "btn_in",
+    "type": "mqtt in",
+    "z": "wallpanel_tab",
+    "name": "Zigbee remote",
+    "topic": "zigbee2mqtt/REMOTE_IEEE",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "wallpanel_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 130,
+    "y": 120,
+    "wires": [
+      [
+        "map_fn"
+      ]
+    ]
+  },
+  {
+    "id": "map_fn",
+    "type": "function",
+    "z": "wallpanel_tab",
+    "name": "map button -> intent",
+    "func": "// Remote button -> intent. Deliberately free of view names: the shell owns\n// the view list (views.js) and resolves these against it, so this node never\n// needs editing when a view is added.\n//\n//   next / prev  - step the arrow rotation, relative to what's ON SCREEN\n//   blank        - show the shell's OFF_VIEW\n//   resume       - clear the retained override, schedule takes back over\n//\n// 'on' publishes the retained clear directly instead of sending an intent, so\n// it still works when the panel is offline (the shell isn't there to relay it).\n\nconst MAP = {\n    arrow_right_click: { topic: \"wallpanel/command\",  payload: \"next\"  },\n    arrow_left_click:  { topic: \"wallpanel/command\",  payload: \"prev\"  },\n    off:               { topic: \"wallpanel/command\",  payload: \"blank\" },\n    on:                { topic: \"wallpanel/override\", payload: \"\", retain: true },\n};\n\nconst action = (msg.payload && msg.payload.action) || \"\";\nif (!action) { return null; }               // ignore non-action messages\n\nconst out = MAP[action];\nif (!out) { return null; }                  // any other button: ignore\n\nreturn out;\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 120,
+    "wires": [
+      [
+        "view_out"
+      ]
+    ]
+  },
+  {
+    "id": "view_out",
+    "type": "mqtt out",
+    "z": "wallpanel_tab",
+    "name": "publish to panel",
+    "topic": "",
+    "qos": "0",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "wallpanel_broker",
+    "x": 690,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "wallpanel_broker",
+    "type": "mqtt-broker",
+    "name": "Mosquitto (Pi)",
+    "broker": "BROKER_HOST",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true
+  }
+]

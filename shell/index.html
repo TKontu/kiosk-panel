@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wall Panel</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Views are rendered into here as "stages" — one per view, created with its
+       orientation baked in and destroyed when it's replaced. app.js never
+       re-orients a stage that is on screen; see style.css. -->
+  <div id="stack"></div>
+
+  <div id="overlay" data-state="connecting">
+    <div id="dot"></div>
+    <div id="headline">Connecting to the panel</div>
+    <div id="detail">Reaching the broker to load your views.</div>
+  </div>
+
+  <!-- Load order matters: config + data first, then the app logic.
+       Plain globals (no ES modules) so it works from file:// with no server. -->
+  <script src="mqtt.min.js"></script>
+  <script src="config.js"></script>
+  <script src="views.js"></script>
+  <script src="schedule.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

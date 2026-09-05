@@ -1,0 +1,87 @@
+:root {
+  --bg: #0d1014;
+  --fg: #e6edf3;
+  --muted: #7d8590;
+  --accent: #4a9eff;
+  --bad: #d9843b;
+
+  /* Crossfade between views. Long and gentle on purpose — this is ambient wall
+     furniture, not a UI. Keep --fade in sync with FADE_MS in app.js. */
+  --fade: 550ms;
+  --ease: cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+/* ---- The stage stack ----------------------------------------------------
+   One .stage per view. A stage is created with its orientation already set and
+   is NEVER re-oriented afterwards: to change view we build a new stage, let it
+   load underneath, then crossfade and drop the old one. That's why no rotation
+   is ever visible on screen — the thing you're looking at never rotates, it
+   just fades out and is discarded.
+
+   Stages are absolutely positioned on top of each other; the newest is last in
+   the DOM, so it fades in OVER the outgoing one. No black gap, no blink. */
+#stack { position: fixed; inset: 0; background: #000; }
+#stack.hidden { visibility: hidden; }
+
+.stage {
+  position: fixed;
+  left: 50%; top: 50%;
+  border: 0;
+  background: #000;
+  opacity: 0;
+  transition: opacity var(--fade) var(--ease);
+  will-change: opacity;          /* keep the fade on the compositor */
+}
+.stage.live { opacity: 1; }
+
+/* Orientation, declared once at creation. The X server already rotates the
+   whole display 90° for the portrait mount; these values counter-rotate a
+   source that doesn't want that (a landscape camera wants -90). */
+.stage[data-rotate="0"]   { width: 100vw; height: 100vh; transform: translate(-50%, -50%); }
+.stage[data-rotate="90"]  { width: 100vh; height: 100vw; transform: translate(-50%, -50%) rotate(90deg); }
+.stage[data-rotate="-90"] { width: 100vh; height: 100vw; transform: translate(-50%, -50%) rotate(-90deg); }
+.stage[data-rotate="180"] { width: 100vw; height: 100vh; transform: translate(-50%, -50%) rotate(180deg); }
+
+.stage > iframe {
+  display: block;
+  width: 100%; height: 100%;
+  border: 0;
+  background: #000;
+}
+
+/* Overlay: visible only when the shell has something to say (connecting,
+   offline, unknown view). */
+#overlay {
+  position: fixed; inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1.5rem;
+  background: var(--bg); color: var(--fg);
+  text-align: center; padding: 2rem;
+}
+#overlay.show { display: flex; }
+
+#dot {
+  width: 0.9rem; height: 0.9rem; border-radius: 50%;
+  background: var(--muted);
+}
+#overlay[data-state="connecting"] #dot {
+  background: var(--accent);
+  animation: pulse 1.6s ease-out infinite;
+}
+#overlay[data-state="offline"] #dot { background: var(--bad); }
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74,158,255,.5); }
+  70%  { box-shadow: 0 0 0 1.2rem rgba(74,158,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(74,158,255,0); }
+}
+
+#headline { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; }
+#detail   { font-size: 1rem; color: var(--muted); max-width: 22rem; line-height: 1.5; }
+#detail code { font-family: ui-monospace, monospace; color: var(--fg); }

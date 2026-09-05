@@ -1,0 +1,14 @@
+# Secret — broker credentials live here
+shell/config.js
+
+# Bundled binary, already present on the kiosk; re-download if needed
+shell/mqtt.min.js
+
+# Local scratch
+*.log
+
+input/
+.env
+
+# Local photo asset; supply your own on the kiosk
+shell/media/image.jpg

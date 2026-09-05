@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The kiosk runs Chromium with --force-dark-mode; declaring the page's own
+     scheme stops it re-processing colours we already chose for dark. -->
+<meta name="color-scheme" content="dark">
+<title>Electricity price</title>
+<style>
+  html { font-size: calc(100vw / 1080 * 16); }
+
+  :root {
+    color-scheme: dark;
+    --surface:  #0d1014;
+    --ink:      #e6edf3;   /* hero, numerals, hands         16.1:1 on surface */
+    --ink-2:    #c9d3dd;   /* secondary                     12.6:1 on surface */
+    --ink-3:    #bcc7d3;   /* ticks, key                    11.1:1 on surface */
+    --hairline: rgba(230,237,243,.09);
+
+    /* Bright on purpose. The panel is 68.8 ppi and read from 2-3 m; hierarchy
+       here comes from size and weight, never from dimming text toward the
+       background. See architecture.md. */
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: var(--surface);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { height: 100%; padding: 5rem 2.2rem 4rem; display: flex; flex-direction: column; }
+
+  .place {
+    font-size: 1.9rem; font-weight: 600; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--ink-2);
+  }
+  .date { margin-top: .6rem; font-size: 2.1rem; color: var(--ink-3); }
+
+  /* The price now lives here rather than in the middle of the dial: the centre
+     of a clock belongs to the hands. */
+  .hero { margin-top: 1.6rem; display: flex; align-items: baseline; gap: 1rem; }
+  .now-price { font-size: 8.5rem; line-height: .9; font-weight: 200; letter-spacing: -.04em; }
+  .unit { font-size: 2.6rem; font-weight: 500; color: var(--ink-2); }
+
+  .clock { flex: 1; display: flex; align-items: center; }
+  #dial { width: 100%; }
+  svg { display: block; width: 100%; }
+
+  /* ---- colour key ------------------------------------------------------- */
+  .legend {
+    margin-top: auto; padding-top: 2.4rem;
+    border-top: 1px solid var(--hairline);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 1.8rem; color: var(--ink-3);
+  }
+  .keys { display: flex; gap: 2.4rem; align-items: center; }
+  .key  { display: flex; gap: .7rem; align-items: center; }
+  .dot  { width: 1.5rem; height: 1.5rem; border-radius: 50%; display: inline-block; }
+  .stale { color: #d9843b; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="place">Electricity &middot; Finland</div>
+  <div class="date" id="date"></div>
+  <div class="hero">
+    <span class="now-price" id="nowPrice">&ndash;</span>
+    <span class="unit">snt/kWh</span>
+  </div>
+
+  <div class="clock"><div id="dial"></div></div>
+
+  <div class="legend">
+    <div class="keys">
+      <span class="key"><i class="dot" style="background:#12b866"></i>under 10</span>
+      <span class="key"><i class="dot" style="background:#e6c92e"></i>10&ndash;20</span>
+      <span class="key"><i class="dot" style="background:#d93b2b"></i>over 20</span>
+      <span>snt/kWh</span>
+    </div>
+    <div id="updated"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* spot-hinta.fi: Finnish day-ahead spot price at the 15-minute market time unit.
+   Sends Access-Control-Allow-Origin: *, so it works from the kiosk's file://
+   origin; needs no key; returns the VAT-inclusive figure itself, so the 25.5 %
+   rate is not hardcoded here.
+
+   Shape: [{ Rank, DateTime: "2026-09-05T00:15:00+03:00",
+             PriceNoTax, PriceWithTax }]  - EUR/kWh, local Finnish time. */
+
+/* Retailer margin, snt/kWh, VAT-inclusive, added to every figure so the dial
+   shows what is actually payable. The unit is explicit because the same number
+   read as EUR/kWh is a hundred times larger and the display would still look
+   plausible. It is not printed on screen - set it here or on the URL:
+     electricity.html?margin=0.5                  -> snt/kWh (default)
+     electricity.html?margin=0.005&marginUnit=eur -> EUR/kWh, x100
+     electricity.html?margin=5&marginUnit=eurmwh  -> EUR/MWh, /10            */
+var MARGIN = (function () {
+  var p = new URLSearchParams(location.search);
+  var m = parseFloat(p.get("margin"));
+  if (!isFinite(m)) m = 0.5;
+  switch ((p.get("marginUnit") || "snt").toLowerCase()) {
+    case "eur":    return m * 100;
+    case "eurmwh": return m / 10;
+    default:       return m;
+  }
+})();
+
+var API_TODAY    = "https://api.spot-hinta.fi/Today";
+var API_TOMORROW = "https://api.spot-hinta.fi/DayForward";
+var REFRESH_MS   = 15 * 60 * 1000;
+var RETICK_MS    = 30 * 1000;          // keep the minute hand honest
+var CACHE_KEY    = "wallpanel.elec";
+var HOURS        = 12;                 // exactly one turn of the dial
+
+var SVGNS = "http://www.w3.org/2000/svg";
+function el(name, attrs, text) {
+  var n = document.createElementNS(SVGNS, name);
+  for (var k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
+}
+function cents(eurPerKwh) { return eurPerKwh * 100 + MARGIN; }
+function fmt(c) { return Math.abs(c) >= 100 ? c.toFixed(0) : c.toFixed(1); }
+function pad2(n) { return ("0" + n).slice(-2); }
+
+/* ------------------------------------------------------------------ colour
+   A traffic-light ramp with the thresholds as hard turns: green below 10,
+   yellow through the teens, red above 20. The stops either side of 10 and 20
+   are deliberately close together so a band change is unmistakable from across
+   the room, while each band still shades continuously rather than sitting flat.
+   Every stop clears 3:1 against the surface, the floor for a large mark. */
+var STOPS = [
+  [-5,   [ 10, 168,  90]],   // negative price - paid to consume; deepest green
+  [ 0,   [ 18, 184, 102]],
+  [ 9.5, [126, 201,  63]],   // still unmistakably green at the top of the band
+  [10.5, [230, 201,  46]],   // yellow begins
+  [19.5, [239, 176,  24]],
+  [20.5, [232, 102,  58]],   // red begins
+  [35,   [191,  36,  29]]    // deep red; flat above this
+];
+
+function priceColour(v) {
+  if (v <= STOPS[0][0]) return rgb(STOPS[0][1]);
+  for (var i = 1; i < STOPS.length; i++) {
+    if (v <= STOPS[i][0]) {
+      var a = STOPS[i - 1], b = STOPS[i], t = (v - a[0]) / (b[0] - a[0]);
+      return rgb([0, 1, 2].map(function (k) {
+        return Math.round(a[1][k] + (b[1][k] - a[1][k]) * t);
+      }));
+    }
+  }
+  return rgb(STOPS[STOPS.length - 1][1]);
+}
+function rgb(c) { return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")"; }
+
+/* -------------------------------------------------------------- geometry */
+function polar(cx, cy, r, deg) {
+  var a = (deg - 90) * Math.PI / 180;      // 0 deg = 12 o'clock
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+// One wedge of the ring, between angles a0 and a1.
+function wedge(cx, cy, rIn, rOut, a0, a1) {
+  var p0 = polar(cx, cy, rOut, a0), p1 = polar(cx, cy, rOut, a1);
+  var p2 = polar(cx, cy, rIn,  a1), p3 = polar(cx, cy, rIn,  a0);
+  var big = (a1 - a0) > 180 ? 1 : 0;
+  return "M" + p0 + "A" + rOut + " " + rOut + " 0 " + big + " 1 " + p1 +
+         "L" + p2 + "A" + rIn  + " " + rIn  + " 0 " + big + " 0 " + p3 + "Z";
+}
+
+/* ------------------------------------------------------------------- fetch */
+function getJSON(u) {
+  return fetch(u, { cache: "no-store" }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  });
+}
+
+function load() {
+  // Tomorrow only exists once the day-ahead auction has cleared (~14:00), and
+  // the dial needs it as soon as "the next twelve hours" crosses midnight - but
+  // a miss must not take the view down.
+  Promise.all([
+    getJSON(API_TODAY),
+    getJSON(API_TOMORROW).catch(function () { return null; })
+  ]).then(function (r) {
+    var payload = { today: r[0], tomorrow: r[1], at: Date.now() };
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(payload)); } catch (e) {}
+    render(payload, false);
+  }).catch(function () {
+    try {
+      var c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      if (c) render(c, true);
+    } catch (e) {}
+  });
+}
+
+/* ------------------------------------------------------------------ render */
+var last = null;
+
+function hourKey(d) {
+  return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate() + "-" + d.getHours();
+}
+
+function render(payload, stale) {
+  last = payload;
+  var rows = (payload.today || []).concat(payload.tomorrow || []);
+  if (!rows.length) return;
+
+  var now = new Date();
+  document.getElementById("date").textContent =
+    now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+
+  // Bucket every quarter-hour under its wall-clock hour.
+  var byHour = {};
+  rows.forEach(function (r) {
+    var d = new Date(r.DateTime);
+    (byHour[hourKey(d)] = byHour[hourKey(d)] || []).push({ t: d, v: cents(r.PriceWithTax) });
+  });
+
+  // The twelve hours starting with the one we are in. Twelve hours is exactly
+  // one turn of the dial, so every hour lands where a clock would put it.
+  var start = new Date(now); start.setMinutes(0, 0, 0);
+  var hours = [];
+  for (var i = 0; i < HOURS; i++) {
+    var d = new Date(start.getTime() + i * 3600e3);
+    var q = (byHour[hourKey(d)] || []).slice().sort(function (a, b) { return a.t - b.t; });
+    hours.push({
+      hour: d.getHours(),
+      quarters: q,
+      avg: q.length ? q.reduce(function (s, x) { return s + x.v; }, 0) / q.length : null
+    });
+  }
+
+  // The headline is the quarter we are actually inside, not the hour average.
+  var cur = null, best = null;
+  (byHour[hourKey(now)] || []).forEach(function (q) {
+    if (q.t <= now && (!best || q.t > best.t)) best = q;
+  });
+  if (best) cur = best.v;
+  else if (hours[0].avg != null) cur = hours[0].avg;
+  document.getElementById("nowPrice").textContent = cur == null ? "–" : fmt(cur);
+
+  drawDial(hours, now);
+
+  document.getElementById("updated").innerHTML = stale
+    ? '<span class="stale">● offline · ' +
+      new Date(payload.at).toLocaleTimeString("en-GB",
+        { hour: "2-digit", minute: "2-digit" }) + "</span>"
+    : "updated " + now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+/* ---------------------------------------------------------------- the dial
+   Built as an actual clock face, not a donut chart: a rim, hour numerals set
+   inside it where a clock puts them, minute ticks, and real hour and minute
+   hands turning on a centre hub. The price ring is the bezel around that face,
+   and the hour averages sit outside it in place of nothing at all — a clock has
+   no numbers out there, which is exactly why they read as added information. */
+var S = 900, C = S / 2;
+var R_OUT = 336, R_IN = 280;         // the coloured price bezel
+var R_FACE = 272;                    // the clock face inside it
+var R_TICK = 258;                    // minute ticks sit just inside the face edge
+var R_NUM  = 186;                    // hour numerals — clear of the tick ring
+var R_PRICE = 384;                   // hour-average prices, outside the bezel
+var HAND_H = 132, HAND_M = 196;
+
+function drawDial(hours, now) {
+  var svg = el("svg", { viewBox: "0 0 " + S + " " + S });
+
+  // --- the price bezel ----------------------------------------------------
+  hours.forEach(function (h, i) {
+    var a0 = (h.hour % 12) * 30 + 0.9;      // ~1.8 deg of surface between hours
+    var a1 = a0 + 30 - 1.8;                 // so hour boundaries stay legible
+
+    if (h.avg == null) {                    // tomorrow not published yet
+      svg.appendChild(el("path", {
+        d: wedge(C, C, R_IN, R_OUT, a0, a1),
+        fill: "none", stroke: "var(--hairline)", "stroke-width": 2
+      }));
+    } else {
+      // Each hour is subdivided into its own quarter-hours, so the 15-minute
+      // resolution survives as colour banding even though the number outside
+      // the bezel is the hour average.
+      var span = (a1 - a0) / h.quarters.length;
+      h.quarters.forEach(function (q, k) {
+        svg.appendChild(el("path", {
+          // +0.35 deg overlap so adjacent quarters show no seam of background;
+          // only the deliberate gap between hours does.
+          d: wedge(C, C, R_IN, R_OUT, a0 + span * k,
+                   Math.min(a1, a0 + span * (k + 1) + 0.35)),
+          fill: priceColour(q.v)
+        }));
+      });
+    }
+
+    // The hour's average price, outside the bezel.
+    var mid = (a0 + a1) / 2;
+    var pp = polar(C, C, R_PRICE, mid);
+    svg.appendChild(el("text", {
+      x: pp[0], y: pp[1], "text-anchor": "middle", "dominant-baseline": "central",
+      "font-size": i === 0 ? 50 : 44, "font-weight": i === 0 ? 700 : 500,
+      fill: "var(--ink)"
+    }, h.avg == null ? "–" : fmt(h.avg)));
+  });
+
+  // --- the clock face -----------------------------------------------------
+  svg.appendChild(el("circle", {
+    cx: C, cy: C, r: R_FACE, fill: "var(--surface)",
+    stroke: "var(--hairline)", "stroke-width": 2
+  }));
+
+  // Minute ticks, with the hour positions longer and brighter — the detail that
+  // makes a circle read as a clock rather than a ring.
+  for (var m = 0; m < 60; m++) {
+    var onHour = m % 5 === 0;
+    var a = m * 6;
+    var p1 = polar(C, C, R_TICK, a);
+    var p2 = polar(C, C, R_TICK - (onHour ? 17 : 8), a);
+    svg.appendChild(el("line", {
+      x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1],
+      stroke: onHour ? "var(--ink-3)" : "var(--hairline)",
+      "stroke-width": onHour ? 4 : 2, "stroke-linecap": "round"
+    }));
+  }
+
+  // Hour numerals, set inside the face where a clock puts them. They are the
+  // real hours (12..23), not 1..12, so a wedge's colour can be tied to a time
+  // of day without a second lookup.
+  hours.forEach(function (h, i) {
+    var at = polar(C, C, R_NUM, (h.hour % 12) * 30);
+    svg.appendChild(el("text", {
+      x: at[0], y: at[1], "text-anchor": "middle", "dominant-baseline": "central",
+      "font-size": i === 0 ? 46 : 40, "font-weight": i === 0 ? 700 : 400,
+      fill: i === 0 ? "var(--ink)" : "var(--ink-3)"
+    }, pad2(h.hour)));
+  });
+
+  // --- hands --------------------------------------------------------------
+  var hourA = ((now.getHours() % 12) + now.getMinutes() / 60) * 30;
+  var minA  = now.getMinutes() * 6;
+  function hand(angle, len, width) {
+    var tip  = polar(C, C, len, angle);
+    var tail = polar(C, C, -26, angle);      // a short counterweight past centre
+    svg.appendChild(el("line", {
+      x1: tail[0], y1: tail[1], x2: tip[0], y2: tip[1],
+      stroke: "var(--ink)", "stroke-width": width, "stroke-linecap": "round"
+    }));
+  }
+  hand(hourA, HAND_H, 13);
+  hand(minA,  HAND_M, 8);
+  svg.appendChild(el("circle", { cx: C, cy: C, r: 14, fill: "var(--ink)" }));
+  svg.appendChild(el("circle", { cx: C, cy: C, r: 5,  fill: "var(--surface)" }));
+
+  var box = document.getElementById("dial");
+  box.innerHTML = "";
+  box.appendChild(svg);
+}
+
+/* No hover layer: the kiosk has no pointing device. */
+(function boot() {
+  try {
+    var c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    if (c) render(c, true);
+  } catch (e) {}
+  load();
+  setInterval(load, REFRESH_MS);
+  setInterval(function () { if (last) render(last, false); }, RETICK_MS);
+})();
+</script>
+</body>
+</html>
