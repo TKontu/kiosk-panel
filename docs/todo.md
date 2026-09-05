@@ -16,10 +16,47 @@ All views render **portrait (1080×1920)** — design tall/narrow. Add each to
 job now; the arrow rotation is derived from `views.js` at runtime and Node-RED
 holds no view names. Use `cycle: false` to keep a view out of the rotation.
 
-- [ ] **Grafana dashboard(s)** — use Grafana's real `?kiosk` mode URL (clean,
-      unlike Frigate); pick panel-friendly, single-column dashboards.
-- [ ] Sensor readings page.
-- [ ] Any other self-hosted pages / "daily something".
+Each idea below has its own `todo-*.md` with the design, the data source and
+whether it is even reachable from the panel's `file://` origin. **Check the
+feasibility note before starting one** — that constraint has already ruled out
+several otherwise-obvious sources.
+
+### Build this first
+
+- [ ] **[Shared view mechanisms](todo-view-mechanisms.md)** — conditional views
+      gated on a retained topic, the alert takeover, and a generic tiles
+      renderer. Unblocks most of the rest; the tiles renderer alone covers two
+      of the views below.
+
+### Ready to build
+
+- [ ] **[3D printer](todo-printer.md)** — camera, temperatures, progress,
+      failure. Fully designed; blocked only on installing the OctoPrint-MQTT
+      plugin. *Set its base topic under `wallpanel/` or the planned broker ACL
+      will silently break it.*
+- [ ] **[Indoor sensors](todo-sensors.md)** — already on the broker via
+      zigbee2mqtt; mostly a rendering job. CO₂ is the metric that changes
+      behaviour.
+
+### Wants a decision or a device
+
+- [ ] **[Homelab status](todo-server-status.md)** — boring 99 % of the time and
+      loud when it is not. Not a gauge dashboard.
+- [ ] **[HSL departures](todo-transit.md)** — probably the highest
+      value-per-pixel item here. Needs a free Digitransit key, so it goes via
+      Node-RED rather than a direct fetch.
+- [ ] **[Consumption against price](todo-energy-use.md)** — needs a P1/HAN reader
+      or clamp meter. The one view with a direct payback.
+- [ ] **[Agent canvas](todo-agent-canvas.md)** — for the Hermes agent. The
+      contract is the whole design; pick the schema over arbitrary HTML.
+- [ ] **[Frigate events](todo-frigate-events.md)** — recent detections rather
+      than a live feed. Frigate already publishes to MQTT.
+
+### Sketches
+
+- [ ] **[Smaller ideas](todo-small-views.md)** — daylight, door/window state,
+      photo rotation, sauna, name day, Grafana embed. Also records what is
+      deliberately **not** going on this panel, and why.
 
 ## Watch items (believed-fixed, confirm over time)
 
@@ -80,6 +117,18 @@ holds no view names. Use `cycle: false` to keep a view out of the rotation.
 # Done (build history, reference)
 
 ## Views / control model
+- [x] **Pastel colour ramp** — mint through butter to rose, replacing the
+      saturated green/yellow/red. Better suited to a near-black surface: every
+      stop is 6.7–14.2:1 against it, where the saturated ramp bottomed at 3.02:1
+      and its burgundy end could be mistaken for the empty track. Watch butter
+      against the expensive end when retuning — a salmon there measured dE 13.5,
+      below the 15 normal-vision floor.
+- [x] **Continuous colour ring + clock hands** — the ring is now 360 one-degree
+      segments interpolated between quarter-hour centres, with no gaps between
+      hours (the gaps were why it read as a tachometer). Colour is one ramp from
+      dark green through yellow-green and amber to red and burgundy rather than
+      three flat bands. Hands are tapered blades with a tail and hour markers are
+      batons, not needles and hairlines.
 - [x] **Dial refinements** — hour figures moved to the half-hour spoke (they are
       averages over the hour, not readings at the tick); the outer ring now
       carries a weather symbol with the temperature (1/2/3 drops or flakes by

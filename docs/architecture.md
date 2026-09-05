@@ -316,17 +316,62 @@ location and no temperatures.
 ### Colour
 
 Colour is the encoding, on fixed thresholds rather than the day's own spread:
-green below 10 snt/kWh, yellow 10–20, red above 20, negative prices at the
-deepest green. The stops either side of each threshold sit close together so a
-band change is unmistakable from across the room, while each band still shades
-continuously. Every stop clears 3:1 against the surface. Because absolute
-thresholds cannot be read off the ring alone, the key at the bottom is not
-decoration — do not remove it.
+green below 10 snt/kWh, yellow-to-orange 10–20, red above 20, negative prices
+at the deepest green. Because absolute thresholds cannot be read off the ring
+alone, the key at the bottom is not decoration — do not remove it.
+
+It is **one continuous pastel ramp**, not three flat bands: mint lightening
+through pale sage to butter, then apricot and peach into coral and rose.
+Neighbouring hours differ by a shade, so the ring reads as a gradient rather than
+a bar chart bent into a circle. The thresholds are still legible as turns in the
+ramp; nothing steps.
+
+**Pastels suit this near-black surface far better than the saturated version they
+replaced.** Every stop now sits between 6.7:1 and 14.2:1 against the surface,
+where the saturated ramp bottomed out at 3.02:1 and its burgundy end was
+confusable with the empty "no price yet" track. On a dark panel the dark end of a
+ramp is the dangerous end, and pastels simply do not have one.
+
+The pair to watch when retuning is **butter against the expensive end**. A salmon
+was tried there first and measured **dE 13.5** against butter in normal vision —
+below the 15 floor, so "middling" and "expensive" looked alike at a glance.
+Pushing the top of the ramp toward rose rather than orange fixed it: adjacent band
+anchors now separate by dE 19.8 and the extremes by 25.3, while no single step
+exceeds dE 6.0, which is what keeps it continuous.
+
+Colour-blind separation is deliberately **not** a constraint on this panel.
+
+### Drawing the ring
+
+The ring is **360 one-degree segments**, each coloured from the price
+interpolated at that instant rather than from the quarter-hour it falls in. Two
+things follow, both deliberate:
+
+- **No gaps between hours.** An earlier version left 1.8° of background
+  between hour wedges to mark the boundaries. It made the ring look segmented,
+  and was the single biggest reason the dial read as a tachometer.
+- **Colour changes continuously.** Each quarter-hour price is treated as sampled
+  at the *centre* of its quarter and interpolated between centres, which is what
+  keeps the gradient smooth across a boundary instead of stepping at it.
+
+Segments overlap by 0.45° so antialiasing cannot leave hairlines between them.
+
+There is one genuine hard edge, where the twelve-hour window wraps — the start
+of the current hour, where the oldest and newest hour meet. That discontinuity is
+real data rather than an artefact: everything clockwise of it is the future.
+
+An empty track ring is drawn underneath everything, so hours with no price yet
+show as bare track rather than as a hole.
 
 ### Placement rules the layout depends on
 
 - Hour prices sit at `R_PRICE`, well clear of the tick ring; at a larger radius
   they collide with the hour ticks.
+- The hands are **tapered blades with a counterweight tail**, drawn as filled
+  polygons — broad at the shoulder, coming to a point. A constant-width rounded
+  line is a speedometer needle; this is what reads as a clock. Hour markers are
+  **batons** rather than hairlines for the same reason, with a fine minute track
+  between them.
 - The hands are drawn **twice** — a surface-coloured halo, then the hand. Without
   it a white hand crossing a white price is unreadable, and unlike a clock's
   numerals these figures are the data.

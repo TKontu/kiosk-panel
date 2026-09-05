@@ -98,9 +98,9 @@
 
   <div class="legend">
     <div class="keys">
-      <span class="key"><i class="dot" style="background:#12b866"></i>under 10</span>
-      <span class="key"><i class="dot" style="background:#e6c92e"></i>10&ndash;20</span>
-      <span class="key"><i class="dot" style="background:#d93b2b"></i>over 20</span>
+      <span class="key"><i class="dot" style="background:#63c294"></i>under 10</span>
+      <span class="key"><i class="dot" style="background:#f5dd8c"></i>10&ndash;20</span>
+      <span class="key"><i class="dot" style="background:#f47f9c"></i>over 20</span>
       <span>snt/kWh</span>
     </div>
     <div id="updated"></div>
@@ -189,19 +189,38 @@ function cents(eurPerKwh) { return eurPerKwh * 100 + MARGIN; }
 function fmtP(c) { return Math.abs(c) >= 100 ? c.toFixed(0) : c.toFixed(1); }
 
 /* ------------------------------------------------------------------ colour
-   A traffic-light ramp with the thresholds as hard turns: green below 10,
-   yellow through the teens, red above 20. The stops either side of 10 and 20
-   are deliberately close together so a band change is unmistakable from across
-   the room, while each band still shades continuously rather than sitting flat.
-   Every stop clears 3:1 against the surface, the floor for a large mark. */
+   One continuous pastel ramp rather than three flat bands, so neighbouring hours
+   differ by a shade and the ring reads as a gradient instead of a bar chart bent
+   into a circle. Mint lightening through pale sage to butter, then apricot and
+   peach into coral and rose.
+
+   Pastels turn out to suit a near-black surface far better than the saturated
+   version this replaced: every stop sits between 6.7:1 and 14.2:1 against the
+   surface, where the old ramp bottomed out at 3.02:1 and its burgundy end was
+   confusable with the empty "no price yet" track. That constraint is simply gone
+   now - the dark end of the ramp is the *light* end of the palette.
+
+   The pair to watch when retuning is butter against the expensive end. An
+   earlier attempt used a salmon there and measured dE 13.5 against butter in
+   normal vision - below the 15 floor, so "middling" and "expensive" looked alike
+   at a glance. Pushing the top of the ramp toward rose rather than orange fixed
+   it: adjacent band anchors now separate by dE 19.8 and the extremes by 25.3,
+   while no single step exceeds dE 6.0, which is what keeps it looking continuous.
+
+   (Colour-blind separation is deliberately not a constraint here.) */
 var STOPS = [
-  [-5,   [ 10, 168,  90]],   // negative price - paid to consume; deepest green
-  [ 0,   [ 18, 184, 102]],
-  [ 9.5, [126, 201,  63]],
-  [10.5, [230, 201,  46]],   // yellow begins
-  [19.5, [239, 176,  24]],
-  [20.5, [232, 102,  58]],   // red begins
-  [35,   [191,  36,  29]]
+  [ -5,  [ 79, 179, 131]],   // deep mint - negative price, paid to consume
+  [  0,  [ 99, 194, 148]],   // mint
+  [  5,  [139, 207, 149]],
+  [  8,  [181, 218, 145]],
+  [ 10,  [216, 224, 142]],   // pale sage; the first turn
+  [ 13,  [245, 221, 140]],   // butter
+  [ 16,  [248, 205, 140]],   // soft apricot
+  [ 19,  [249, 185, 143]],   // peach
+  [ 20,  [247, 164, 147]],   // coral; the second turn
+  [ 24,  [246, 143, 154]],
+  [ 32,  [244, 127, 156]],   // rose
+  [ 45,  [238, 111, 157]]    // deep rose; flat above this
 ];
 function priceColour(v) {
   if (v <= STOPS[0][0]) return rgb(STOPS[0][1]);
@@ -526,62 +545,94 @@ function render(payload, stale) {
 }
 
 /* ---------------------------------------------------------------- the dial
-   A working clock face - rim, minute ticks, real hour and minute hands on a
-   hub - wrapped in a coloured price bezel. There are no hour numerals: the
-   hands and the tick ring say the time, which frees those positions for the
-   data.
+   A working clock face - rim, minute track, tapered hands on a hub - wrapped in
+   a coloured price ring. No hour numerals: the hands and the markers say the
+   time, which frees those positions for the data.
 
-   Everything belonging to an hour sits on that hour's HALF-HOUR spoke, in the
+   Everything belonging to an hour sits on that hour's half-hour spoke, in the
    middle of its wedge, because these are averages over the hour rather than
    readings at the tick. Price inside, weather outside, on one radius. */
 var S = 900, C = S / 2;
-var R_OUT = 300, R_IN = 250;         // the coloured price bezel
-var R_FACE = 242;                    // the clock face inside it
-var R_TICK = 228;                    // minute ticks, just inside the face edge
-var R_PRICE = 166;                   // hour prices, where the numerals were
-var R_WX = 374;                      // weather cluster anchor, outside the bezel
-var HAND_H = 108, HAND_M = 166;
+var R_OUT = 342, R_IN = 286;         // the coloured price ring
+var R_FACE = 278;                    // the clock face inside it
+var R_TICK = 264;                    // minute track, just inside the face edge
+var R_PRICE = 192;                   // hour prices, where the numerals would be
+var R_WX = 388;                      // weather cluster anchor, outside the ring
+var SEG = 1;                         // degrees per ring segment
+
+/* The ring is drawn as 360 one-degree segments whose colour comes from the price
+   interpolated at that instant, not from the quarter-hour it falls in. Two
+   consequences, both deliberate:
+
+     - there are NO gaps between hours. An earlier version left 1.8 deg of
+       background between wedges to mark the boundaries; it made the ring look
+       segmented, like a tachometer.
+     - colour changes continuously, so a quarter where the price is climbing
+       shows the climb rather than a flat block that steps at the boundary.
+
+   Each quarter-hour price is treated as sampled at the CENTRE of its quarter and
+   interpolated between centres, which is what keeps the gradient smooth across a
+   boundary instead of stepping at it. Segments overlap slightly so antialiasing
+   cannot leave hairlines between them. */
+function priceAt(samples, tHours) {
+  if (!samples.length) return null;
+  if (tHours <= samples[0].t) return samples[0].v;
+  if (tHours >= samples[samples.length - 1].t) return samples[samples.length - 1].v;
+  for (var i = 1; i < samples.length; i++) {
+    if (tHours <= samples[i].t) {
+      var a = samples[i - 1], b = samples[i];
+      var f = (tHours - a.t) / (b.t - a.t);
+      return a.v + (b.v - a.v) * f;
+    }
+  }
+  return null;
+}
 
 function drawDial(hours, now) {
   var svg = el("svg", { viewBox: "0 0 " + S + " " + S });
+  var startHour = hours[0].hour;
 
+  // Flatten the quarter-hour prices onto a single timeline measured in hours
+  // from the start of the window, each sample sitting at its quarter's centre.
+  var samples = [];
   hours.forEach(function (h, i) {
-    var a0 = (h.hour % 12) * 30 + 0.9;      // ~1.8 deg of surface between hours
-    var a1 = a0 + 30 - 1.8;                 // so hour boundaries stay legible
-    var mid = (h.hour % 12) * 30 + 15;      // the half-hour spoke
-    var isNow = i === 0;
+    var n = h.quarters.length;
+    h.quarters.forEach(function (q, k) {
+      samples.push({ t: i + (k + 0.5) / n, v: q.v });
+    });
+  });
 
-    if (h.avg == null) {                    // tomorrow's prices not published
-      svg.appendChild(el("path", {
-        d: wedge(C, C, R_IN, R_OUT, a0, a1),
-        fill: "none", stroke: "var(--hairline)", "stroke-width": 2
-      }));
-    } else {
-      // Each hour is subdivided into its own quarter-hours, so the 15-minute
-      // resolution survives as colour banding even though the figure inside is
-      // the hour average.
-      var span = (a1 - a0) / h.quarters.length;
-      h.quarters.forEach(function (x, k) {
-        svg.appendChild(el("path", {
-          // +0.35 deg overlap so adjacent quarters show no seam of background;
-          // only the deliberate gap between hours does.
-          d: wedge(C, C, R_IN, R_OUT, a0 + span * k,
-                   Math.min(a1, a0 + span * (k + 1) + 0.35)),
-          fill: priceColour(x.v)
-        }));
-      });
-    }
+  // The empty track shows through wherever there is no price yet - tomorrow's
+  // hours before the day-ahead auction clears.
+  svg.appendChild(el("circle", {
+    cx: C, cy: C, r: (R_IN + R_OUT) / 2, fill: "none",
+    stroke: "var(--hairline)", "stroke-width": R_OUT - R_IN
+  }));
 
-    // Weather outside the bezel: a symbol over the temperature. The symbol
-    // carries type and how much (one, two or three drops or flakes), which a
-    // millimetre figure never did at a glance.
+  for (var a = 0; a < 360; a += SEG) {
+    var mid = a + SEG / 2;
+    // Which hour of the window sits at this angle? The twelve hours tile the
+    // face exactly once, so this is a straight mapping.
+    var t = (((mid / 30) - (startHour % 12)) % 12 + 12) % 12;
+    if (!hours[Math.floor(t)] || hours[Math.floor(t)].avg == null) continue;
+    var v = priceAt(samples, t);
+    if (v == null) continue;
+    svg.appendChild(el("path", {
+      d: wedge(C, C, R_IN, R_OUT, a, a + SEG + 0.45),   // overlap kills hairlines
+      fill: priceColour(v)
+    }));
+  }
+
+  // Weather outside the ring: a symbol over the temperature.
+  hours.forEach(function (h, i) {
+    var mid = (h.hour % 12) * 30 + 15;
     var pw = polar(C, C, R_WX, mid);
     if (h.spec) svg.appendChild(glyphGroup(h.spec, pw[0], pw[1] - 26, 46));
     svg.appendChild(el("text", {
       x: pw[0], y: pw[1] + 28, "text-anchor": "middle", "dominant-baseline": "central",
-      "font-size": isNow ? 46 : 40, "font-weight": isNow ? 700 : 500,
+      "font-size": i === 0 ? 48 : 42, "font-weight": i === 0 ? 700 : 500,
       fill: "var(--ink)"
-    }, h.temp == null ? "–" : Math.round(h.temp) + "°"));
+    }, h.temp == null ? "\u2013" : Math.round(h.temp) + "\u00b0"));
   });
 
   // --- the clock face -----------------------------------------------------
@@ -590,53 +641,69 @@ function drawDial(hours, now) {
     stroke: "var(--hairline)", "stroke-width": 2
   }));
 
-  // Minute ticks, hours longer and brighter. With the numerals gone these do
-  // the work of making a circle read as a clock.
+  // Baton hour markers and a fine minute track. Batons rather than thin lines:
+  // a hairline index reads as a gauge scale, a baton reads as a wall clock.
   for (var m = 0; m < 60; m++) {
     var onHour = m % 5 === 0;
-    var a = m * 6;
-    var p1 = polar(C, C, R_TICK, a);
-    var p2 = polar(C, C, R_TICK - (onHour ? 18 : 8), a);
+    var ang = m * 6;
+    var p1 = polar(C, C, R_TICK, ang);
+    var p2 = polar(C, C, R_TICK - (onHour ? 26 : 8), ang);
     svg.appendChild(el("line", {
       x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1],
       stroke: onHour ? "var(--ink-3)" : "var(--hairline)",
-      "stroke-width": onHour ? 4 : 2, "stroke-linecap": "round"
+      "stroke-width": onHour ? 9 : 2,
+      "stroke-linecap": onHour ? "butt" : "round"
     }));
   }
 
-  // Hour average prices, on the half-hour spoke — between the ticks, in the
-  // middle of the hour they describe.
+  // Hour average prices, on the half-hour spoke.
   hours.forEach(function (h, i) {
     var at = polar(C, C, R_PRICE, (h.hour % 12) * 30 + 15);
     svg.appendChild(el("text", {
       x: at[0], y: at[1], "text-anchor": "middle", "dominant-baseline": "central",
-      "font-size": i === 0 ? 46 : 40, "font-weight": i === 0 ? 700 : 500,
+      "font-size": i === 0 ? 50 : 44, "font-weight": i === 0 ? 700 : 500,
       fill: "var(--ink)"
-    }, h.avg == null ? "–" : fmtP(h.avg)));
+    }, h.avg == null ? "\u2013" : fmtP(h.avg)));
   });
 
   // --- hands --------------------------------------------------------------
-  // Drawn twice: a surface-coloured halo first, then the hand. Without the halo
-  // a white hand crossing a white price is unreadable - and unlike a clock's
-  // numerals, these figures are the data.
-  var hourA = ((now.getHours() % 12) + now.getMinutes() / 60) * 30;
-  var minA  = now.getMinutes() * 6;
-  function hand(angle, len, width) {
-    var tip  = polar(C, C, len, angle);
-    var tail = polar(C, C, -24, angle);      // short counterweight past centre
-    svg.appendChild(el("line", {
-      x1: tail[0], y1: tail[1], x2: tip[0], y2: tip[1],
-      stroke: "var(--surface)", "stroke-width": width + 10, "stroke-linecap": "round"
+  /* Tapered blades with a counterweight tail, not needles. A constant-width
+     rounded line is a speedometer needle; a hand that is broad at the shoulder
+     and comes to a point is what reads as a clock.
+
+     Drawn twice - a surface-coloured halo, then the hand - because unlike a
+     clock's numerals the figures underneath are the data, and a white hand
+     crossing a white price is unreadable without the separation. */
+  function handPath(angle, len, halfW, tail) {
+    var pts = [
+      [0, -len],                    // point
+      [halfW, -len * 0.74],         // shoulder
+      [halfW * 0.42, tail],         // base
+      [-halfW * 0.42, tail],
+      [-halfW, -len * 0.74]
+    ];
+    var r = angle * Math.PI / 180, cos = Math.cos(r), sin = Math.sin(r);
+    return "M" + pts.map(function (q) {
+      return (C + q[0] * cos - q[1] * sin).toFixed(1) + " " +
+             (C + q[0] * sin + q[1] * cos).toFixed(1);
+    }).join("L") + "Z";
+  }
+  function hand(angle, len, halfW) {
+    var d = handPath(angle, len, halfW, 30);
+    svg.appendChild(el("path", {
+      d: d, fill: "var(--surface)", stroke: "var(--surface)",
+      "stroke-width": 11, "stroke-linejoin": "round"
     }));
-    svg.appendChild(el("line", {
-      x1: tail[0], y1: tail[1], x2: tip[0], y2: tip[1],
-      stroke: "var(--ink)", "stroke-width": width, "stroke-linecap": "round"
+    svg.appendChild(el("path", {
+      d: d, fill: "var(--ink)", stroke: "var(--ink)",
+      "stroke-width": 1.5, "stroke-linejoin": "round"
     }));
   }
-  hand(hourA, HAND_H, 12);
-  hand(minA,  HAND_M, 7);
-  svg.appendChild(el("circle", { cx: C, cy: C, r: 13, fill: "var(--ink)" }));
-  svg.appendChild(el("circle", { cx: C, cy: C, r: 5,  fill: "var(--surface)" }));
+  hand(((now.getHours() % 12) + now.getMinutes() / 60) * 30, 124, 11);
+  hand(now.getMinutes() * 6, 196, 7.5);
+
+  svg.appendChild(el("circle", { cx: C, cy: C, r: 15, fill: "var(--ink)" }));
+  svg.appendChild(el("circle", { cx: C, cy: C, r: 5.5, fill: "var(--surface)" }));
 
   var box = document.getElementById("dial");
   box.innerHTML = "";
