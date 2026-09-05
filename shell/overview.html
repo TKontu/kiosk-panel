@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The kiosk runs Chromium with --force-dark-mode; declaring the page's own
+     scheme stops it re-processing colours we already chose for dark. -->
+<meta name="color-scheme" content="dark">
+<title>Overview</title>
+<style>
+  html { font-size: calc(100vw / 1080 * 16); }
+
+  :root {
+    color-scheme: dark;
+    --surface:  #0d1014;
+    --ink:      #e6edf3;   /* hero, hour figures, hands     16.1:1 on surface */
+    --ink-2:    #c9d3dd;   /* symbols, secondary            12.6:1 on surface */
+    --ink-3:    #bcc7d3;   /* ticks, key                    11.1:1 on surface */
+    --hairline: rgba(230,237,243,.09);
+
+    /* Bright on purpose. The panel is 68.8 ppi and read from 2-3 m; hierarchy
+       here comes from size and weight, never from dimming text toward the
+       background. See architecture.md. */
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: var(--surface);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { height: 100%; padding: 5rem 1.4rem 4rem; display: flex; flex-direction: column; }
+
+  /* ---- header: price on the left, the 12 h weather line on the right ----- */
+  .head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 2rem; padding: 0 .8rem;
+  }
+  .place {
+    font-size: 1.9rem; font-weight: 600; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--ink-2);
+  }
+  .date { margin-top: .6rem; font-size: 2.1rem; color: var(--ink-3); }
+  .hero { margin-top: 1.4rem; display: flex; align-items: baseline; gap: 1rem; }
+  .now-price { font-size: 8rem; line-height: .9; font-weight: 200; letter-spacing: -.04em; }
+  .unit { font-size: 2.4rem; font-weight: 500; color: var(--ink-2); }
+
+  /* One weather topic for the next twelve hours, nothing more. */
+  .outlook { text-align: right; padding-top: .3rem; }
+  .outlook svg { width: 6.5rem; height: 6.5rem; color: var(--ink-2); margin-left: auto; }
+  .outlook-k {
+    font-size: 1.3rem; letter-spacing: .17em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .outlook-v { margin-top: .5rem; font-size: 2.4rem; font-weight: 500; }
+  .outlook-s { margin-top: .3rem; font-size: 1.9rem; color: var(--ink-2); }
+
+  .clock { flex: 1; display: flex; align-items: center; }
+  #dial { width: 100%; }
+  #dial svg { display: block; width: 100%; }
+
+  /* ---- colour key ------------------------------------------------------- */
+  .legend {
+    margin-top: auto; padding: 2.4rem .8rem 0;
+    border-top: 1px solid var(--hairline);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 1.8rem; color: var(--ink-3);
+  }
+  .keys { display: flex; gap: 2.4rem; align-items: center; }
+  .key  { display: flex; gap: .7rem; align-items: center; }
+  .dot  { width: 1.5rem; height: 1.5rem; border-radius: 50%; display: inline-block; }
+  .stale { color: #d9843b; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div>
+      <div class="place" id="place">&mdash;</div>
+      <div class="date" id="date"></div>
+      <div class="hero">
+        <span class="now-price" id="nowPrice">&ndash;</span>
+        <span class="unit">snt/kWh</span>
+      </div>
+    </div>
+    <div class="outlook">
+      <div id="outlookIcon"></div>
+      <div class="outlook-k">Next 12 h</div>
+      <div class="outlook-v" id="outlookV"></div>
+      <div class="outlook-s" id="outlookS"></div>
+    </div>
+  </div>
+
+  <div class="clock"><div id="dial"></div></div>
+
+  <div class="legend">
+    <div class="keys">
+      <span class="key"><i class="dot" style="background:#12b866"></i>under 10</span>
+      <span class="key"><i class="dot" style="background:#e6c92e"></i>10&ndash;20</span>
+      <span class="key"><i class="dot" style="background:#d93b2b"></i>over 20</span>
+      <span>snt/kWh</span>
+    </div>
+    <div id="updated"></div>
+  </div>
+</div>
+
+<!-- Site-specific values (places, margin) live in config.js, which is
+     gitignored. This page is loaded in an iframe, so it must load config.js
+     itself — it does not inherit window.CONFIG from index.html. -->
+<script src="config.js"></script>
+
+<script>
+"use strict";
+
+/* One dial, two datasets.
+
+   The bezel is the Finnish day-ahead electricity price at the 15-minute market
+   time unit (spot-hinta.fi). Inside it, where a clock keeps its numerals, is
+   each hour's average price. Outside it is the weather for that same hour
+   (Open-Meteo): a symbol and a temperature.
+
+   Both sources send Access-Control-Allow-Origin: *, which is what lets this work
+   at all from the kiosk's file:// origin (where the Origin header is literally
+   "null"); neither needs a key. spot-hinta returns the VAT-inclusive figure
+   itself, so 25.5 % is not hardcoded here. */
+
+var q = new URLSearchParams(location.search);
+
+/* Places are named in config.js (CONFIG.places), so no coordinates sit in a
+   file that is safe to publish. The first entry there is the default.
+     overview.html                       -> CONFIG.places, first entry
+     overview.html?place=<key>
+     overview.html?lat=..&lon=..&name=.. -> bypass config entirely            */
+var PLACES = (window.CONFIG && window.CONFIG.places) || {};
+var KEYS   = Object.keys(PLACES);
+var preset = PLACES[(q.get("place") || KEYS[0] || "").toLowerCase()] ||
+             PLACES[KEYS[0]] || {};
+var PLACE = {
+  name: q.get("name") || preset.name,
+  lat:  parseFloat(q.get("lat")) || preset.lat,
+  lon:  parseFloat(q.get("lon")) || preset.lon
+};
+
+/* Retailer margin, snt/kWh, VAT-inclusive, added to every price shown. The unit
+   is explicit because the same number read as EUR/kWh is a hundred times larger
+   and the display would still look plausible. Not printed on screen.
+     ?margin=0.5                  -> snt/kWh (default, or CONFIG.electricity)
+     ?margin=0.005&marginUnit=eur -> EUR/kWh, x100
+     ?margin=5&marginUnit=eurmwh  -> EUR/MWh, /10                            */
+var MARGIN = (function () {
+  var cfg = (window.CONFIG && window.CONFIG.electricity) || {};
+  var m = parseFloat(q.get("margin"));
+  if (!isFinite(m)) m = parseFloat(cfg.marginSnt);
+  if (!isFinite(m)) m = 0.5;
+  switch ((q.get("marginUnit") || "snt").toLowerCase()) {
+    case "eur":    return m * 100;
+    case "eurmwh": return m / 10;
+    default:       return m;
+  }
+})();
+
+var API_TODAY    = "https://api.spot-hinta.fi/Today";
+var API_TOMORROW = "https://api.spot-hinta.fi/DayForward";
+function apiWeather() {
+  return "https://api.open-meteo.com/v1/forecast" +
+    "?latitude=" + PLACE.lat + "&longitude=" + PLACE.lon +
+    "&hourly=temperature_2m,precipitation,snowfall,weather_code," +
+      "wind_speed_10m,wind_gusts_10m" +
+    "&daily=sunrise,sunset" +
+    "&timezone=Europe%2FHelsinki&wind_speed_unit=ms&forecast_days=2";
+}
+
+var REFRESH_MS = 15 * 60 * 1000;
+var RETICK_MS  = 30 * 1000;            // keep the minute hand honest
+var CACHE_KEY  = "wallpanel.overview";
+var HOURS      = 12;                   // exactly one turn of the dial
+
+var SVGNS = "http://www.w3.org/2000/svg";
+function el(name, attrs, text) {
+  var n = document.createElementNS(SVGNS, name);
+  for (var k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
+}
+function cents(eurPerKwh) { return eurPerKwh * 100 + MARGIN; }
+function fmtP(c) { return Math.abs(c) >= 100 ? c.toFixed(0) : c.toFixed(1); }
+
+/* ------------------------------------------------------------------ colour
+   A traffic-light ramp with the thresholds as hard turns: green below 10,
+   yellow through the teens, red above 20. The stops either side of 10 and 20
+   are deliberately close together so a band change is unmistakable from across
+   the room, while each band still shades continuously rather than sitting flat.
+   Every stop clears 3:1 against the surface, the floor for a large mark. */
+var STOPS = [
+  [-5,   [ 10, 168,  90]],   // negative price - paid to consume; deepest green
+  [ 0,   [ 18, 184, 102]],
+  [ 9.5, [126, 201,  63]],
+  [10.5, [230, 201,  46]],   // yellow begins
+  [19.5, [239, 176,  24]],
+  [20.5, [232, 102,  58]],   // red begins
+  [35,   [191,  36,  29]]
+];
+function priceColour(v) {
+  if (v <= STOPS[0][0]) return rgb(STOPS[0][1]);
+  for (var i = 1; i < STOPS.length; i++) {
+    if (v <= STOPS[i][0]) {
+      var a = STOPS[i - 1], b = STOPS[i], t = (v - a[0]) / (b[0] - a[0]);
+      return rgb([0, 1, 2].map(function (k) {
+        return Math.round(a[1][k] + (b[1][k] - a[1][k]) * t);
+      }));
+    }
+  }
+  return rgb(STOPS[STOPS.length - 1][1]);
+}
+function rgb(c) { return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")"; }
+
+/* ------------------------------------------------------------- weather kind
+   WMO code -> what to draw. Intensity is taken from the actual amount rather
+   than the code, so "how much rain" is answered by millimetres and the symbol
+   just has to show one, two or three drops. */
+var KIND = {
+  0:"clear", 1:"clear", 2:"partly", 3:"cloudy", 45:"fog", 48:"fog",
+  51:"rain", 53:"rain", 55:"rain", 56:"rain", 57:"rain",
+  61:"rain", 63:"rain", 65:"rain", 66:"rain", 67:"rain",
+  71:"snow", 73:"snow", 75:"snow", 77:"snow", 85:"snow", 86:"snow",
+  80:"rain", 81:"rain", 82:"rain",
+  95:"thunder", 96:"thunder", 99:"thunder"
+};
+var LABEL = {
+  0:"Clear", 1:"Mainly clear", 2:"Partly cloudy", 3:"Overcast",
+  45:"Fog", 48:"Rime fog", 51:"Light drizzle", 53:"Drizzle", 55:"Heavy drizzle",
+  56:"Freezing drizzle", 57:"Freezing drizzle", 61:"Light rain", 63:"Rain",
+  65:"Heavy rain", 66:"Freezing rain", 67:"Freezing rain", 71:"Light snow",
+  73:"Snow", 75:"Heavy snow", 77:"Snow grains", 80:"Light showers",
+  81:"Showers", 82:"Heavy showers", 85:"Snow showers", 86:"Snow showers",
+  95:"Thunderstorm", 96:"Thunderstorm", 99:"Thunderstorm"
+};
+// Which condition should represent twelve hours? The most consequential one —
+// you want to know it is going to rain, not that it is cloudy on average.
+var SEVERITY = { clear:0, partly:1, cloudy:2, fog:3, snow:5, rain:6, thunder:7 };
+
+function intensity(kind, mm, cm) {
+  if (kind === "snow") return cm >= 2 ? 3 : cm >= 0.5 ? 2 : 1;
+  if (kind === "rain") return mm >= 2 ? 3 : mm >= 0.5 ? 2 : 1;
+  return 0;
+}
+
+/* ------------------------------------------------------------- moon phase
+   Days since a known new moon, folded into the synodic month. Good to well
+   under a day, which is far more than a 40 px glyph can show. */
+var SYNODIC = 29.530588853;
+var KNOWN_NEW = Date.UTC(2000, 0, 6, 18, 14);
+function moonPhase(date) {
+  var p = (((date.getTime() - KNOWN_NEW) / 86400000) % SYNODIC) / SYNODIC;
+  return p < 0 ? p + 1 : p;                  // 0 new, .25 first qtr, .5 full
+}
+// Two arcs. The lit limb is a semicircle (right when waxing, left when waning);
+// the terminator is an ellipse returning from bottom to top, whose semi-axis is
+// r at new and full and 0 at the quarters.
+//
+// The sweep flag on that second arc is the whole trick, and it is easy to get
+// backwards: going bottom-to-top, sweep 1 passes to the LEFT and sweep 0 to the
+// RIGHT. So a crescent (bulge into the lit half, removing area) and a gibbous
+// (bulge away, adding it) need opposite flags — and which is which also flips
+// with the lit side. Getting this wrong renders every phase as its own
+// complement: a new moon draws as full and a full moon draws as empty, while
+// the quarters look fine because they are symmetric.
+function moonPath(cx, cy, r, phase) {
+  var k = (1 - Math.cos(2 * Math.PI * phase)) / 2;   // illuminated fraction
+  var waxing = phase < 0.5;
+  var rx = r * Math.abs(1 - 2 * k);                  // 0 at the quarters, r at new/full
+  var limb = waxing ? 1 : 0;
+  var term = waxing ? (k < 0.5 ? 0 : 1) : (k < 0.5 ? 1 : 0);
+  return "M " + cx + " " + (cy - r) +
+         " A " + r + " " + r + " 0 0 " + limb + " " + cx + " " + (cy + r) +
+         " A " + rx.toFixed(2) + " " + r + " 0 0 " + term + " " +
+         cx + " " + (cy - r) + " Z";
+}
+// The moon's outline, so a new moon still reads as "night" rather than nothing.
+var MOON_RING = "M24 13a11 11 0 1 1 0 22 11 11 0 1 1 0-22z";
+
+/* ------------------------------------------------------------ weather glyph
+   Drawn in a 48x48 box. Returns [{d, filled}] so the same shapes can be handed
+   to an HTML <svg> string (the header) or to real SVG elements (the dial). */
+var CLOUD = "M14 32h19a7.4 7.4 0 0 0 .6-14.8 10.4 10.4 0 0 0-19.9 2.5A6.7 6.7 0 0 0 14 32z";
+function drop(x, y) {
+  return "M" + x + " " + y + "c0 0-3.4 3.8-3.4 5.7a3.4 3.4 0 0 0 6.8 0c0-1.9-3.4-5.7-3.4-5.7z";
+}
+function flake(x, y) {
+  return "M" + x + " " + (y - 4) + "v8M" + (x - 3.5) + " " + (y - 2) + "l7 4" +
+         "M" + (x - 3.5) + " " + (y + 2) + "l7-4";
+}
+var SPREAD = { 1: [24], 2: [18, 30], 3: [13, 24, 35] };
+
+function glyph(spec) {
+  var out = [];
+  var kind = spec.kind, n = spec.n || 0;
+
+  if (kind === "clear") {
+    if (spec.night) {
+      out.push({ d: MOON_RING });
+      out.push({ d: moonPath(24, 24, 11, spec.phase), filled: true });
+    }
+    else {
+      out.push({ d: "M24 15.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17z" });
+      out.push({ d: "M24 4v5M24 39v5M4 24h5M39 24h5M9.9 9.9l3.6 3.6" +
+                    "M34.5 34.5l3.6 3.6M38.1 9.9l-3.6 3.6M13.5 34.5l-3.6 3.6" });
+    }
+    return out;
+  }
+  if (kind === "partly") {
+    if (spec.night) out.push({ d: moonPath(17, 15, 7.5, spec.phase), filled: true });
+    else {
+      out.push({ d: "M17 9.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" });
+      out.push({ d: "M17 2v3.5M4 15h3.5M7.8 5.8l2.4 2.4M26.2 5.8l-2.4 2.4" });
+    }
+    out.push({ d: CLOUD });
+    return out;
+  }
+
+  out.push({ d: CLOUD });
+  if (kind === "fog")     out.push({ d: "M11 38h26M15 44h18" });
+  if (kind === "thunder") out.push({ d: "M27 35l-7 6h5.5l-2.5 7" });
+  if (kind === "rain")    SPREAD[n].forEach(function (x) { out.push({ d: drop(x, 36), filled: true }); });
+  if (kind === "snow")    SPREAD[n].forEach(function (x) { out.push({ d: flake(x, 41) }); });
+  return out;
+}
+
+function glyphSVG(spec, cls) {
+  return '<svg viewBox="0 0 48 48" class="' + (cls || "") + '" fill="none" ' +
+         'stroke="currentColor" stroke-width="2.6" stroke-linecap="round" ' +
+         'stroke-linejoin="round">' +
+         glyph(spec).map(function (p) {
+           return p.filled
+             ? '<path d="' + p.d + '" fill="currentColor" stroke="none"/>'
+             : '<path d="' + p.d + '"/>';
+         }).join("") + "</svg>";
+}
+
+function glyphGroup(spec, cx, cy, size) {
+  var s = size / 48;
+  var g = el("g", {
+    transform: "translate(" + (cx - size / 2) + " " + (cy - size / 2) + ") scale(" + s + ")",
+    fill: "none", stroke: "var(--ink-2)", "stroke-width": 3.2,
+    "stroke-linecap": "round", "stroke-linejoin": "round"
+  });
+  glyph(spec).forEach(function (p) {
+    g.appendChild(p.filled
+      ? el("path", { d: p.d, fill: "var(--ink-2)", stroke: "none" })
+      : el("path", { d: p.d }));
+  });
+  return g;
+}
+
+/* -------------------------------------------------------------- geometry */
+function polar(cx, cy, r, deg) {
+  var a = (deg - 90) * Math.PI / 180;      // 0 deg = 12 o'clock
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+function wedge(cx, cy, rIn, rOut, a0, a1) {
+  var p0 = polar(cx, cy, rOut, a0), p1 = polar(cx, cy, rOut, a1);
+  var p2 = polar(cx, cy, rIn,  a1), p3 = polar(cx, cy, rIn,  a0);
+  var big = (a1 - a0) > 180 ? 1 : 0;
+  return "M" + p0 + "A" + rOut + " " + rOut + " 0 " + big + " 1 " + p1 +
+         "L" + p2 + "A" + rIn  + " " + rIn  + " 0 " + big + " 0 " + p3 + "Z";
+}
+
+/* ------------------------------------------------------------------- fetch */
+function getJSON(u) {
+  return fetch(u, { cache: "no-store" }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  });
+}
+
+function load() {
+  // Tomorrow's prices only exist once the day-ahead auction has cleared
+  // (~14:00), and the dial needs them as soon as the next twelve hours cross
+  // midnight - but a miss there must not take the whole view down.
+  Promise.all([
+    getJSON(API_TODAY),
+    getJSON(API_TOMORROW).catch(function () { return null; }),
+    getJSON(apiWeather()).catch(function () { return null; })
+  ]).then(function (r) {
+    var payload = { today: r[0], tomorrow: r[1], wx: r[2], at: Date.now() };
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(payload)); } catch (e) {}
+    render(payload, false);
+  }).catch(function () {
+    try {
+      var c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      if (c) render(c, true);
+    } catch (e) {}
+  });
+}
+
+/* ------------------------------------------------------------------ render */
+var last = null;
+
+function hourKey(d) {
+  return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate() + "-" + d.getHours();
+}
+function isoDay(d) {          // local YYYY-MM-DD, matching Open-Meteo's daily.time
+  return d.getFullYear() + "-" +
+         ("0" + (d.getMonth() + 1)).slice(-2) + "-" +
+         ("0" + d.getDate()).slice(-2);
+}
+
+function render(payload, stale) {
+  last = payload;
+  var rows = (payload.today || []).concat(payload.tomorrow || []);
+  var wx = payload.wx;
+  var now = new Date();
+
+  document.getElementById("place").textContent = PLACE.name || "—";
+  document.getElementById("date").textContent =
+    now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+
+  // ---- prices, bucketed under their wall-clock hour ----------------------
+  var byHour = {};
+  rows.forEach(function (r) {
+    var d = new Date(r.DateTime);
+    (byHour[hourKey(d)] = byHour[hourKey(d)] || []).push({ t: d, v: cents(r.PriceWithTax) });
+  });
+
+  // ---- weather, indexed the same way, plus the day's sun times -----------
+  var wxAt = {}, sun = {};
+  if (wx && wx.hourly) {
+    wx.hourly.time.forEach(function (t, i) {
+      wxAt[hourKey(new Date(t))] = {
+        temp: wx.hourly.temperature_2m[i],
+        next: wx.hourly.temperature_2m[i + 1],
+        rain: wx.hourly.precipitation[i] || 0,
+        snow: wx.hourly.snowfall[i] || 0,
+        code: wx.hourly.weather_code[i],
+        gust: wx.hourly.wind_gusts_10m[i]
+      };
+    });
+  }
+  if (wx && wx.daily) {
+    wx.daily.time.forEach(function (t, i) {
+      sun[t] = { up: new Date(wx.daily.sunrise[i]), down: new Date(wx.daily.sunset[i]) };
+    });
+  }
+  function isNight(d) {
+    var s = sun[isoDay(d)];
+    if (!s) {                                   // no sun data: fall back on the clock
+      var h = d.getHours();
+      return h < 6 || h >= 21;
+    }
+    return d < s.up || d >= s.down;
+  }
+
+  // The twelve hours starting with the one we are in. Twelve hours is exactly
+  // one turn of the dial, so every hour lands where a clock would put it.
+  var start = new Date(now); start.setMinutes(0, 0, 0);
+  var hours = [];
+  for (var i = 0; i < HOURS; i++) {
+    var d = new Date(start.getTime() + i * 3600e3);
+    var k = hourKey(d);
+    var qs = (byHour[k] || []).slice().sort(function (a, b) { return a.t - b.t; });
+    var w = wxAt[k] || null;
+    var kind = w && KIND[w.code] ? KIND[w.code] : (w ? "cloudy" : null);
+    hours.push({
+      hour: d.getHours(),
+      quarters: qs,
+      avg: qs.length ? qs.reduce(function (s, x) { return s + x.v; }, 0) / qs.length : null,
+      // "Average temperature" for the hour: the mean of its endpoints. The
+      // hourly series is instantaneous, so one reading is the value at the top
+      // of the hour, not the hour.
+      temp: w ? (w.next == null ? w.temp : (w.temp + w.next) / 2) : null,
+      code: w ? w.code : null,
+      gust: w ? w.gust : null,
+      rain: w ? w.rain : 0,
+      snow: w ? w.snow : 0,
+      spec: w ? {
+        kind: kind,
+        n: intensity(kind, w.rain, w.snow),
+        night: isNight(d),
+        phase: moonPhase(d)
+      } : null
+    });
+  }
+
+  // ---- headline price: the quarter we are actually inside ----------------
+  var cur = null, best = null;
+  (byHour[hourKey(now)] || []).forEach(function (x) {
+    if (x.t <= now && (!best || x.t > best.t)) best = x;
+  });
+  if (best) cur = best.v;
+  else if (hours[0].avg != null) cur = hours[0].avg;
+  document.getElementById("nowPrice").textContent = cur == null ? "–" : fmtP(cur);
+
+  // ---- the one weather topic for the next twelve hours -------------------
+  var worstCode = null, gustMax = null, rainTotal = 0, snowTotal = 0;
+  hours.forEach(function (h) {
+    if (h.code != null) {
+      var k = KIND[h.code] || "cloudy";
+      if (worstCode == null || SEVERITY[k] > SEVERITY[KIND[worstCode] || "cloudy"]) worstCode = h.code;
+    }
+    if (h.gust != null) gustMax = gustMax == null ? h.gust : Math.max(gustMax, h.gust);
+    rainTotal += h.rain || 0;
+    snowTotal += h.snow || 0;
+  });
+  if (worstCode != null) {
+    var wk = KIND[worstCode] || "cloudy";
+    document.getElementById("outlookIcon").innerHTML = glyphSVG({
+      kind: wk, n: intensity(wk, rainTotal, snowTotal),
+      night: isNight(now), phase: moonPhase(now)
+    });
+    document.getElementById("outlookV").textContent = LABEL[worstCode] || "—";
+  }
+  document.getElementById("outlookS").textContent =
+    (rainTotal > 0.05 ? Math.round(rainTotal * 10) / 10 + " mm · " : "") +
+    (gustMax == null ? "" : "gusts " + Math.round(gustMax * 10) / 10 + " m/s");
+
+  drawDial(hours, now);
+
+  document.getElementById("updated").innerHTML = stale
+    ? '<span class="stale">● offline · ' +
+      new Date(payload.at).toLocaleTimeString("en-GB",
+        { hour: "2-digit", minute: "2-digit" }) + "</span>"
+    : "updated " + now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+/* ---------------------------------------------------------------- the dial
+   A working clock face - rim, minute ticks, real hour and minute hands on a
+   hub - wrapped in a coloured price bezel. There are no hour numerals: the
+   hands and the tick ring say the time, which frees those positions for the
+   data.
+
+   Everything belonging to an hour sits on that hour's HALF-HOUR spoke, in the
+   middle of its wedge, because these are averages over the hour rather than
+   readings at the tick. Price inside, weather outside, on one radius. */
+var S = 900, C = S / 2;
+var R_OUT = 300, R_IN = 250;         // the coloured price bezel
+var R_FACE = 242;                    // the clock face inside it
+var R_TICK = 228;                    // minute ticks, just inside the face edge
+var R_PRICE = 166;                   // hour prices, where the numerals were
+var R_WX = 374;                      // weather cluster anchor, outside the bezel
+var HAND_H = 108, HAND_M = 166;
+
+function drawDial(hours, now) {
+  var svg = el("svg", { viewBox: "0 0 " + S + " " + S });
+
+  hours.forEach(function (h, i) {
+    var a0 = (h.hour % 12) * 30 + 0.9;      // ~1.8 deg of surface between hours
+    var a1 = a0 + 30 - 1.8;                 // so hour boundaries stay legible
+    var mid = (h.hour % 12) * 30 + 15;      // the half-hour spoke
+    var isNow = i === 0;
+
+    if (h.avg == null) {                    // tomorrow's prices not published
+      svg.appendChild(el("path", {
+        d: wedge(C, C, R_IN, R_OUT, a0, a1),
+        fill: "none", stroke: "var(--hairline)", "stroke-width": 2
+      }));
+    } else {
+      // Each hour is subdivided into its own quarter-hours, so the 15-minute
+      // resolution survives as colour banding even though the figure inside is
+      // the hour average.
+      var span = (a1 - a0) / h.quarters.length;
+      h.quarters.forEach(function (x, k) {
+        svg.appendChild(el("path", {
+          // +0.35 deg overlap so adjacent quarters show no seam of background;
+          // only the deliberate gap between hours does.
+          d: wedge(C, C, R_IN, R_OUT, a0 + span * k,
+                   Math.min(a1, a0 + span * (k + 1) + 0.35)),
+          fill: priceColour(x.v)
+        }));
+      });
+    }
+
+    // Weather outside the bezel: a symbol over the temperature. The symbol
+    // carries type and how much (one, two or three drops or flakes), which a
+    // millimetre figure never did at a glance.
+    var pw = polar(C, C, R_WX, mid);
+    if (h.spec) svg.appendChild(glyphGroup(h.spec, pw[0], pw[1] - 26, 46));
+    svg.appendChild(el("text", {
+      x: pw[0], y: pw[1] + 28, "text-anchor": "middle", "dominant-baseline": "central",
+      "font-size": isNow ? 46 : 40, "font-weight": isNow ? 700 : 500,
+      fill: "var(--ink)"
+    }, h.temp == null ? "–" : Math.round(h.temp) + "°"));
+  });
+
+  // --- the clock face -----------------------------------------------------
+  svg.appendChild(el("circle", {
+    cx: C, cy: C, r: R_FACE, fill: "var(--surface)",
+    stroke: "var(--hairline)", "stroke-width": 2
+  }));
+
+  // Minute ticks, hours longer and brighter. With the numerals gone these do
+  // the work of making a circle read as a clock.
+  for (var m = 0; m < 60; m++) {
+    var onHour = m % 5 === 0;
+    var a = m * 6;
+    var p1 = polar(C, C, R_TICK, a);
+    var p2 = polar(C, C, R_TICK - (onHour ? 18 : 8), a);
+    svg.appendChild(el("line", {
+      x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1],
+      stroke: onHour ? "var(--ink-3)" : "var(--hairline)",
+      "stroke-width": onHour ? 4 : 2, "stroke-linecap": "round"
+    }));
+  }
+
+  // Hour average prices, on the half-hour spoke — between the ticks, in the
+  // middle of the hour they describe.
+  hours.forEach(function (h, i) {
+    var at = polar(C, C, R_PRICE, (h.hour % 12) * 30 + 15);
+    svg.appendChild(el("text", {
+      x: at[0], y: at[1], "text-anchor": "middle", "dominant-baseline": "central",
+      "font-size": i === 0 ? 46 : 40, "font-weight": i === 0 ? 700 : 500,
+      fill: "var(--ink)"
+    }, h.avg == null ? "–" : fmtP(h.avg)));
+  });
+
+  // --- hands --------------------------------------------------------------
+  // Drawn twice: a surface-coloured halo first, then the hand. Without the halo
+  // a white hand crossing a white price is unreadable - and unlike a clock's
+  // numerals, these figures are the data.
+  var hourA = ((now.getHours() % 12) + now.getMinutes() / 60) * 30;
+  var minA  = now.getMinutes() * 6;
+  function hand(angle, len, width) {
+    var tip  = polar(C, C, len, angle);
+    var tail = polar(C, C, -24, angle);      // short counterweight past centre
+    svg.appendChild(el("line", {
+      x1: tail[0], y1: tail[1], x2: tip[0], y2: tip[1],
+      stroke: "var(--surface)", "stroke-width": width + 10, "stroke-linecap": "round"
+    }));
+    svg.appendChild(el("line", {
+      x1: tail[0], y1: tail[1], x2: tip[0], y2: tip[1],
+      stroke: "var(--ink)", "stroke-width": width, "stroke-linecap": "round"
+    }));
+  }
+  hand(hourA, HAND_H, 12);
+  hand(minA,  HAND_M, 7);
+  svg.appendChild(el("circle", { cx: C, cy: C, r: 13, fill: "var(--ink)" }));
+  svg.appendChild(el("circle", { cx: C, cy: C, r: 5,  fill: "var(--surface)" }));
+
+  var box = document.getElementById("dial");
+  box.innerHTML = "";
+  box.appendChild(svg);
+}
+
+/* No hover layer: the kiosk has no pointing device. */
+(function boot() {
+  if (!isFinite(PLACE.lat) || !isFinite(PLACE.lon)) {
+    document.getElementById("outlookV").textContent = "No location";
+    document.getElementById("outlookS").textContent = "Add CONFIG.places to config.js";
+  }
+  try {
+    var c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    if (c) render(c, true);
+  } catch (e) {}
+  load();
+  setInterval(load, REFRESH_MS);
+  setInterval(function () { if (last) render(last, false); }, RETICK_MS);
+})();
+</script>
+</body>
+</html>

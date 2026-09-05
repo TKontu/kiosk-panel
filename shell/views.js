@@ -37,20 +37,12 @@ window.VIEWS = {
     rotate: false,
   },
 
-  // Day's weather. Places live in config.js (CONFIG.places) and the first one
-  // there is the default, so no URL param is needed; add ?place=<key> here to
-  // pin a different one, or ?lat=..&lon=..&name=.. to bypass config entirely.
-  // Data: Open-Meteo (no API key, CORS-open, works from file://).
-  weather: {
-    url: "weather.html",
-    rotate: 0,
-  },
-
-  // Finnish day-ahead electricity price at the 15-minute market time unit.
-  // Retailer margin is a URL param: ?margin=0.5 (snt/kWh by default;
-  // add &marginUnit=eur or &marginUnit=eurmwh to use other units).
-  electricity: {
-    url: "electricity.html?margin=0.5",
+  // Merged weather + electricity dial. The ring is the 15-minute spot price;
+  // the figures inside it are hour-average prices, the figures outside are that
+  // hour's temperature (and rainfall when there is any). Location comes from
+  // config.js (CONFIG.places); margin is snt/kWh, VAT-inclusive.
+  overview: {
+    url: "overview.html?margin=0.5",
     rotate: 0,
   },
 

@@ -46,8 +46,7 @@ wall-panel/
 │   ├── config.js               #   creds + LAN hosts + places  (SECRET, gitignored)
 │   ├── views.js                #   VIEWS map — THE view list; add views here
 │   ├── photo.html              #   full-bleed still image view (media/image.jpg)
-│   ├── weather.html            #   day's forecast; places from config.js
-│   ├── electricity.html        #   FI spot price, 15 min; ?margin=0.5 (snt/kWh)
+│   ├── overview.html           #   the dial: spot price + weather on one clock
 │   ├── media/                  #   images used by views (image.jpg — not tracked)
 │   ├── schedule.js             #   time-of-day schedule
 │   ├── app.js                  #   MQTT + schedule + override logic
@@ -133,9 +132,10 @@ Remote: arrows cycle content views, `off` blanks, `on` resumes the schedule.
 - **Monitor blackout** — believed fixed (WiFi power-save + HDMI-1.4 OSD +
   clean session); **watch for recurrence** and diagnose with the `xrandr`
   while-black test in `architecture.md`.
-- **Margin is a display setting, not a bill.** `electricity.html?margin=0.5` is
-  snt/kWh **VAT-inclusive**; change it if your contract changes. It does not know
-  about transfer fees or any monthly basic charge.
+- **Margin is a display setting, not a bill.** `overview.html?margin=0.5` is
+  snt/kWh **VAT-inclusive**; change it if your contract changes. It is not shown
+  on screen, and it does not know about transfer fees or any monthly basic
+  charge.
 - **Passive adapter is marginal** — a DP→Mini-DP cable (the Space has Mini-DP
   in) is the clean long-term fix; not yet done.
 - **Git workflow** for `/opt/wallpanel` not yet set up (WinSCP for now).

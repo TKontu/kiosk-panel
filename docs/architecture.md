@@ -111,8 +111,7 @@ maintainability** into:
 | `app.js`      | The logic: MQTT, `tick()`, the stage renderer, overrides.      | rare           |
 | `style.css`   | Stage geometry/crossfade + overlay styling.                    | rare           |
 | `photo.html`  | Full-bleed still-image view; shows `media/image.jpg`.          | rare           |
-| `weather.html`| Day's forecast. Places from `config.js`; data from Open-Meteo. | rare           |
-|`electricity.html`| FI spot price at 15 min. Margin via URL; data from spot-hinta.| rare        |
+|`overview.html`| The dial: price + weather on one clock. Places from `config.js`.| rare         |
 | `media/`      | Images used by views. Not tracked — supply your own.           | occasionally   |
 | `mqtt.min.js` | Bundled MQTT.js (~330 KB), local (no CDN).                     | never          |
 
@@ -217,118 +216,129 @@ restored on next boot).
 > Node-RED version defaults retain to "false" instead of blank, the `on`
 > button's override-clear may not persist across reconnects — check that first.
 
-## The weather view
+## The overview dial
 
-`weather.html` is self-contained: no framework, no CDN, no API key. Data comes
-from **Open-Meteo**, chosen because it is the only good option that actually
-works here — it sends `Access-Control-Allow-Origin: *`, so the page can fetch it
-straight from a `file://` origin (which is `null`, and would be refused by any
-API without open CORS).
+`overview.html` is one view carrying both datasets, because they answer the same
+question — *is now a good moment* — and two separate pages made you wait for the
+rotation to bring the other one round.
 
-Places are named in `config.js` (`CONFIG.places`) rather than in the page, so
-no coordinates sit in a tracked file. The first entry there is the default; the
-URL selects another, or bypasses config altogether:
+It is a working 12-hour clock face: rim, minute ticks, real hour and minute hands
+on a hub. Twelve hours is exactly one turn, which is what makes the metaphor
+work — every hour lands where a clock would put it, so the hands point at the
+data. Reading outward from the middle:
+
+| Ring | Carries |
+|------|---------|
+| Face, where a clock keeps its numerals | that hour's **average electricity price** |
+| The coloured bezel | the **15-minute spot price**, as colour |
+| Outside the bezel | that hour's **weather symbol** and **temperature** |
+
+**Everything belonging to an hour sits on that hour's half-hour spoke**, in the
+middle of its wedge rather than on the boundary tick — price inside and weather
+outside on one radius. These are averages *over* the hour, not readings *at* the
+tick, and putting them on the tick misrepresented that.
+
+There are no hour numerals. The hands and the tick ring say the time, and each
+wedge sits at its own clock position, so the hour is never ambiguous — which
+frees the numeral positions for the prices, the thing a glance is actually for.
+
+**Precipitation is in the symbol, not a number.** One, two or three drops for
+light, moderate and heavy rain; the same in flakes for snow; a sun or a moon for
+clear sky, cloud for overcast, and a bolt for thunder. Intensity comes from the
+actual amount (mm of rain, cm of snowfall) rather than from the WMO code, so
+"how much" is answered by the measurement and the symbol only has to show one,
+two or three. This replaced a millimetre figure, which cost a second line of
+text per hour and said less at a glance.
+
+Day and night come from the day's real sunrise/sunset, so an overnight hour gets
+a moon rather than a sun — **drawn at its actual phase**. Note the phase glyph is
+two arcs: a semicircular lit limb and an elliptical terminator, and the sweep
+flag on that second arc is easy to get backwards. Getting it wrong renders every
+phase as its own complement — a new moon draws as full, a full moon as empty —
+while the quarters still look right, because they are symmetric. There is a
+phase strip in the scratchpad tests; check new and full, never a quarter.
+
+Keep the dial uncluttered: one symbol and one number per hour is the budget.
+
+**One weather topic, top right**, for the next twelve hours: the most
+consequential condition in the window (rain outranks cloud — you want to know it
+is going to rain, not that it is cloudy on average), with total rainfall and peak
+gusts. Wind is there because it is the one useful thing the ring cannot show.
+
+### Sources
+
+Both send `Access-Control-Allow-Origin: *`, which is the only reason any of this
+works from the kiosk's `file://` origin (where the Origin header is literally
+`null`), and neither needs a key.
+
+- **spot-hinta.fi** — Finnish day-ahead price at the 15-minute market time unit,
+  VAT included in the figure itself, so 25.5 % is not hardcoded. The obvious
+  alternatives both failed: `api.porssisahko.net` is hourly *and* sends no CORS
+  header; `dashboard.elering.ee` has 15-minute data but no CORS header either.
+- **Open-Meteo** — hourly temperature, precipitation, weather code and gusts.
+  `wind_speed_unit=ms` (it defaults to km/h; Finland reads m/s) and
+  `timezone=Europe/Helsinki` so the series lines up with the panel's clock.
+
+Tomorrow's prices only exist after the auction clears (~14:00 local), and the
+dial needs them as soon as the next twelve hours cross midnight. That fetch is
+allowed to fail on its own; hours with no price yet are drawn as an empty outline
+with `–`, while still showing their temperature. Both payloads are cached in
+`localStorage` and repainted instantly on load, so a wifi blip shows slightly
+stale numbers with an amber marker rather than a blank wall.
+
+### Configuration
+
+Places come from `config.js` (`CONFIG.places`, first entry is the default), so no
+coordinates sit in a file that is safe to publish. Margin is the retailer margin
+in **snt/kWh, VAT-inclusive**, added to every price shown:
 
 ```
-weather.html                        # first entry in CONFIG.places
-weather.html?place=<key>            # another entry
-weather.html?lat=..&lon=..&name=..  # ad hoc, no config needed
+overview.html                            # CONFIG.places first entry, margin 0.5
+overview.html?place=<key>
+overview.html?lat=..&lon=..&name=..      # ad hoc, no config needed
+overview.html?margin=0.6                 # or CONFIG.electricity.marginSnt
 ```
 
-`weather.html` is an iframe, so it loads its own `<script src="config.js">`
-rather than inheriting `window.CONFIG` from `index.html`.
-
-Points that are easy to get wrong when editing it:
-
-- **`wind_speed_unit=ms`.** Open-Meteo defaults to km/h; Finland reads m/s.
-- **`timezone=Europe/Helsinki`** so the hourly series lines up with the panel's
-  local clock, not UTC.
-- **The stat row and the rain chart use different windows on purpose:**
-  `RAIN TODAY` is the whole calendar day (`daily.precipitation_sum`), the chart
-  is the next 24 h. Mid-morning they legitimately disagree; the labels say which
-  is which.
-- **Last-good caching.** The response is cached in `localStorage` and repainted
-  instantly on load, so a wifi blip shows slightly stale numbers with an amber
-  "offline" marker rather than a blank wall.
-- **Force-dark opt-out** (`<meta name="color-scheme" content="dark">`), like
-  `photo.html` — otherwise Chromium re-processes colours already chosen for dark.
-
-**Charts.** Temperature (actual + feels-like) and rain are two charts sharing one
-time axis, never one chart with two y-scales. The two temperature series are
-distinguished by hue *and* dash pattern, so identity never rests on colour alone;
-the pair was checked for colour-blind separation rather than picked by eye
-(ΔE 26 under deuteranopia against this surface). Only the peak and trough carry
-direct labels — never a number on every point — and the first sample is skipped
-because it is already the hero number. On a dry day the rain plot collapses to a
-one-line statement instead of drawing an empty grid. There is deliberately **no
-hover/tooltip layer**: the kiosk has no pointing device.
-
-## The electricity view
-
-`electricity.html` shows the Finnish day-ahead spot price at the **15-minute
-market time unit** (96 columns a day), from **spot-hinta.fi** — chosen on the
-same test as the weather source: it sends `Access-Control-Allow-Origin: *`, so it
-works from the kiosk's `file://` origin, needs no key, and returns the
-VAT-inclusive figure itself so the 25.5 % rate isn't hardcoded anywhere. The two
-obvious alternatives both failed: `api.porssisahko.net` is hourly and sends no
-CORS header, and `dashboard.elering.ee` does have 15-minute data but sends no
-CORS header either.
-
-**Margin.** `?margin=0.5` is the retailer margin in **snt/kWh, VAT-inclusive**,
-added to every displayed figure so the wall shows what is actually payable. It is
-not shown on screen, so this file is the only record of what the dial includes. The
-unit is spelled out in the config because the same number read as EUR/kWh is a
-hundred times larger: at 0.5 snt/kWh the margin is ~24 % of a typical day's
-average and the day's shape stays readable, whereas 0.5 EUR/kWh would be ~2170 %
-of it and flatten every column into a solid block between 50 and 55. Pass
+The margin unit is spelled out because the same number read as EUR/kWh is a
+hundred times larger and the display would still look plausible: at 0.5 snt/kWh
+the margin is ~24 % of a typical day's average and the day's shape stays
+readable; 0.5 EUR/kWh would flatten every wedge into one colour. Pass
 `&marginUnit=eur` or `&marginUnit=eurmwh` if a contract quotes it otherwise. The
-view knows nothing about transfer fees or monthly basic charges.
+margin is **not printed on screen**, so this file and `config.js` are the only
+record of what the dial includes. It knows nothing about transfer fees or a
+monthly basic charge.
 
-**It is an actual clock, not a donut chart.** The view is a working 12-hour clock
-face — rim, minute ticks, hour numerals set inside where a clock puts them, and
-real hour and minute hands turning on a centre hub — wrapped in a coloured price
-bezel. The bezel is twelve hour-wedges, each at its own clock position, covering
-the twelve hours from the one you are in. Twelve hours is exactly one turn, which
-is what makes the metaphor work: every hour lands where a clock would put it, so
-the hands point at the price. Outside the bezel, each wedge carries that hour's
-average price.
+**`overview.html` is loaded in an iframe, so it loads its own
+`<script src="config.js">`** — it does not inherit `window.CONFIG` from
+`index.html`. Forgetting this is silent: the dial still draws, just with no
+location and no temperatures.
 
-The numerals are the real hours (12…23, 00…) rather than 1…12, so a colour can be
-tied to a time of day without a second lookup. The hands sweep over them, as they
-do on any clock.
+### Colour
 
-**The centre belongs to the hands**, so the current price is a hero number in the
-header instead. An earlier revision put it in the middle and every attempt to
-show "now" on the dial fought with it — a hand from the centre struck through the
-number, and a detached line segment read as a stray mark. Once the price moved
-out, real hands became possible and the "now" marker stopped being a problem at
-all: the hands *are* the marker.
-
-Each wedge is subdivided into its four quarter-hours, so the 15-minute resolution
-survives as colour banding even though the printed number is the hour mean.
-
-**Colour is the encoding**, on fixed thresholds rather than the day's own spread:
-green below 10 snt/kWh, yellow 10–20, red above 20, with negative prices at the
+Colour is the encoding, on fixed thresholds rather than the day's own spread:
+green below 10 snt/kWh, yellow 10–20, red above 20, negative prices at the
 deepest green. The stops either side of each threshold sit close together so a
 band change is unmistakable from across the room, while each band still shades
 continuously. Every stop clears 3:1 against the surface. Because absolute
 thresholds cannot be read off the ring alone, the key at the bottom is not
 decoration — do not remove it.
 
-Two placement rules the layout depends on: hour numerals sit at `R_NUM`, pulled
-well clear of the tick ring — at a larger radius they collided with the hour
-ticks (`—21`, a tick struck through `23`); and the price labels outside the bezel
-hang off a single anchor per wedge, because placing a label at two radii along
-the same spoke puts them side by side at 3 and 9 o'clock, where they run
-together.
+### Placement rules the layout depends on
 
-Tomorrow's prices only exist after the day-ahead auction clears (~14:00 local), so
-that fetch is allowed to fail on its own without taking the view down. The dial
-needs them as soon as "the next twelve hours" crosses midnight; hours with no
-data yet are drawn as an empty outline with no price.
+- Hour prices sit at `R_PRICE`, well clear of the tick ring; at a larger radius
+  they collide with the hour ticks.
+- The hands are drawn **twice** — a surface-coloured halo, then the hand. Without
+  it a white hand crossing a white price is unreadable, and unlike a clock's
+  numerals these figures are the data.
+- The centre belongs to the hands, so the current price is a hero in the header.
+  An earlier revision put it in the middle and every attempt to mark "now" fought
+  with it; once the price moved out, real hands became possible and the marker
+  problem disappeared — the hands *are* the marker.
 
-**The source/VAT/margin line was removed** from the view at the owner's request.
-The margin is still applied — it is just not printed. `views.js` holds the value.
+> **Superseded:** `weather.html` and `electricity.html` were the two views this
+> replaced. They are still in the tree and in git history but are no longer in
+> `views.js`. `weather.html` has detail the dial deliberately drops (an hourly
+> temperature chart, a rain chart, sunrise/sunset) if you ever want it back.
 
 ## Reading these views from across the room
 

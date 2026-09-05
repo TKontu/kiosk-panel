@@ -80,6 +80,18 @@ holds no view names. Use `cycle: false` to keep a view out of the rotation.
 # Done (build history, reference)
 
 ## Views / control model
+- [x] **Dial refinements** — hour figures moved to the half-hour spoke (they are
+      averages over the hour, not readings at the tick); the outer ring now
+      carries a weather symbol with the temperature (1/2/3 drops or flakes by
+      actual amount, sun/moon by real sunrise-sunset, moon at its true phase)
+      instead of a millimetre figure.
+- [x] **Weather and electricity merged into one `overview` dial** — the two
+      answered the same question and you had to wait for the rotation to see the
+      other. One 12-hour clock: hour-average prices where the numerals were, the
+      15-minute spot price as the coloured bezel, that hour's temperature outside
+      it (rainfall only when there is any), and one weather topic — condition,
+      rain total, peak gusts — top right. `weather.html` and `electricity.html`
+      are superseded but left in the tree.
 - [x] **`electricity` view** — `electricity.html`, Finnish day-ahead spot price
       at the 15-minute market time unit, VAT-inclusive, plus a configurable
       retailer margin (`?margin=0.5`, snt/kWh). Source: spot-hinta.fi (the only

@@ -14,7 +14,7 @@
 //   timedatectl set-timezone Europe/Helsinki
 
 window.SCHEDULE = [
-  { id: "morning", start:  6 * 60, end:  8 * 60, view: "weather" }, // 06:00–08:00
+  { id: "morning", start:  6 * 60, end:  8 * 60, view: "overview" }, // 06:00–08:00
   { id: "camera",  start: 19 * 60, end: 24 * 60, view: "tapo"    }, // 19:00–00:00
 ];
 

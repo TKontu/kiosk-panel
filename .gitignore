@@ -10,5 +10,7 @@ shell/mqtt.min.js
 input/
 .env
 
-# Local photo asset; supply your own on the kiosk
-shell/media/image.jpg
+# Local photo assets; supply your own on the kiosk. The whole directory is
+# ignored, not just image.jpg — naming one file meant a second asset dropped in
+# later would have been committed silently.
+shell/media/
