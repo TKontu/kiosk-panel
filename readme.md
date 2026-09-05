@@ -35,9 +35,11 @@ the real values live only in the gitignored `config.js`.
 
 ```
 wall-panel/
-├── readme.md                    # this file
-├── architecture.md             # as-built design + ops gotchas
-├── todo.md                     # done vs. remaining
+├── readme.md                   # this file
+├── LICENSE                     # MIT
+├── docs/
+│   ├── architecture.md         #   as-built design + ops gotchas
+│   └── todo.md                 #   done vs. remaining
 ├── shell/                      # the browser kiosk page (deploy to /opt/wallpanel/shell/)
 │   ├── index.html              #   skeleton, loads the scripts in order
 │   ├── config.example.js       #   copy to config.js and fill in (this one IS tracked)
@@ -137,3 +139,8 @@ Remote: arrows cycle content views, `off` blanks, `on` resumes the schedule.
 - **Passive adapter is marginal** — a DP→Mini-DP cable (the Space has Mini-DP
   in) is the clean long-term fix; not yet done.
 - **Git workflow** for `/opt/wallpanel` not yet set up (WinSCP for now).
+
+## License
+
+MIT — see [LICENSE](LICENSE). The bundled `mqtt.min.js` is MQTT.js, MIT-licensed
+separately; it is not tracked here.
