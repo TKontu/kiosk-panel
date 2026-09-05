@@ -4,10 +4,7 @@
     "type": "tab",
     "label": "Wall Panel Control",
     "disabled": false,
-    "info": "Maps a Zigbee remote to wall-panel INTENTS.
-
-On import, set this flow's zigbee2mqtt-in topic to YOUR remote's IEEE
-address and point both MQTT nodes at your own authenticated broker config.\n\n  arrow_right_click -> wallpanel/command = next\n  arrow_left_click  -> wallpanel/command = prev\n  off               -> wallpanel/command = blank\n  on                -> wallpanel/override = \"\" (retained) - resume schedule\n\nThis flow deliberately contains NO view names. The shell (views.js) owns the\nview list and resolves next/prev/blank against it at runtime, so adding a view\nnever requires touching or re-importing this flow.\n\n'on' clears the retained override directly rather than going through the\nshell, so resuming the schedule still works while the panel is offline."
+    "info": "Maps a Zigbee remote to wall-panel INTENTS.\n\nOn import, set this flow's zigbee2mqtt-in topic to YOUR remote's IEEE\naddress and point both MQTT nodes at your own authenticated broker config.\n\n  arrow_right_click -> wallpanel/command = next\n  arrow_left_click  -> wallpanel/command = prev\n  off               -> wallpanel/command = blank\n  on                -> wallpanel/override = \"\" (retained) - resume schedule\n\nThis flow deliberately contains NO view names. The shell (views.js) owns the\nview list and resolves next/prev/blank against it at runtime, so adding a view\nnever requires touching or re-importing this flow.\n\n'on' clears the retained override directly rather than going through the\nshell, so resuming the schedule still works while the panel is offline."
   },
   {
     "id": "btn_in",
