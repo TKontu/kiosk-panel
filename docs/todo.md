@@ -24,9 +24,8 @@ several otherwise-obvious sources.
 ### Build this first
 
 - [ ] **[Shared view mechanisms](todo-view-mechanisms.md)** — conditional views
-      gated on a retained topic, the alert takeover, and a generic tiles
-      renderer. Unblocks most of the rest; the tiles renderer alone covers two
-      of the views below.
+      are **done**; the alert takeover and the generic tiles renderer are still
+      open. The tiles renderer alone covers two of the views below.
 
 ### Ready to build
 
@@ -47,8 +46,10 @@ several otherwise-obvious sources.
       Node-RED rather than a direct fetch.
 - [ ] **[Consumption against price](todo-energy-use.md)** — needs a P1/HAN reader
       or clamp meter. The one view with a direct payback.
-- [ ] **[Agent canvas](todo-agent-canvas.md)** — for the Hermes agent. The
-      contract is the whole design; pick the schema over arbitrary HTML.
+- [x] **[Agent canvas](todo-agent-canvas.md)** — panel side **built and
+      deployed**; contract in [`agent-canvas-schema.md`](agent-canvas-schema.md).
+      What remains is the broker ACL, the mediator and the agent-side tool, none
+      of which live in this repo.
 - [ ] **[Frigate events](todo-frigate-events.md)** — recent detections rather
       than a live feed. Frigate already publishes to MQTT.
 

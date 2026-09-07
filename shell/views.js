@@ -46,6 +46,29 @@ window.VIEWS = {
     rotate: 0,
   },
 
+  // Agent canvas. Hermes publishes to hermes/canvas; a mediator validates it
+  // and republishes here, retained, so the panel never reads the agent's topic
+  // directly and the agent can never reach the panel's control topics.
+  //
+  // Gated: in the rotation only while a payload is present and announces a
+  // schema version this shell understands. An agent with nothing to say, or a
+  // mediator that rejected the last payload, leaves the rotation rather than
+  // showing a blank page. The test is a shape check, not schema validation -
+  // validation belongs in the mediator, where the agent cannot skip it.
+  canvas: {
+    url: "canvas.html",
+    rotate: 0,
+    activeWhen: {
+      topic: "canvas",
+      test: function (payload) {
+        try {
+          var d = JSON.parse(payload);
+          return !!d && d.v === 1;
+        } catch (e) { return false; }
+      },
+    },
+  },
+
   // Pure-black blanking view. Inline data: URL so it never depends on the
   // network or a file path — it can always render, which is what you want for
   // reliably blanking the panel. (Signal stays up; monitor is NOT powered off,

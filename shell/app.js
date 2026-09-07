@@ -34,11 +34,51 @@
     views:    BASE + "/views",          // retained: the cycle, for discovery
   }, C.topics || {});
 
+  // ---- Gated views ------------------------------------------------------
+  // A view may be gated on a retained topic: it joins the rotation only while
+  // that topic holds a payload its own test accepts. An agent with nothing to
+  // say, or a printer that isn't printing, leaves the rotation instead of
+  // sitting in it showing an empty page.
+  //
+  //   activeWhen: "canvas"                       // present and non-empty
+  //   activeWhen: { topic: "canvas", test: fn }  // ...and fn(payload) is truthy
+  //
+  // The topic is relative to the same base as everything else, so views.js
+  // still carries no absolute topics. The test lives in views.js rather than
+  // here because it is a property of the view, and app.js should not learn any
+  // view's payload schema.
+  const gates = {};                    // resolved topic -> last retained payload
+
+  function gateOf(name) {
+    const g = window.VIEWS[name] && window.VIEWS[name].activeWhen;
+    if (!g) return null;
+    const spec = typeof g === "string" ? { topic: g } : g;
+    return { topic: BASE + "/" + spec.topic, test: spec.test };
+  }
+  function gateTopics() {
+    const out = [];
+    Object.keys(window.VIEWS).forEach((n) => {
+      const g = gateOf(n);
+      if (g && out.indexOf(g.topic) === -1) out.push(g.topic);
+    });
+    return out;
+  }
+  function isActive(name) {
+    const g = gateOf(name);
+    if (!g) return true;                         // ungated views are always in
+    const payload = gates[g.topic];
+    if (!payload) return false;                  // absent, or cleared to empty
+    if (typeof g.test !== "function") return true;
+    // A throwing test means "not usable", never an exception out of cycle().
+    try { return !!g.test(payload); } catch (e) { return false; }
+  }
+
   // ---- The cycle, derived from views.js ---------------------------------
-  // Every view is in the arrow rotation unless it opts out with cycle:false.
-  // Order is the order they're declared in views.js.
+  // Every view is in the arrow rotation unless it opts out with cycle:false or
+  // its gate is closed. Order is the order they're declared in views.js.
   function cycle() {
-    return Object.keys(window.VIEWS).filter((n) => window.VIEWS[n].cycle !== false);
+    return Object.keys(window.VIEWS).filter(
+      (n) => window.VIEWS[n].cycle !== false && isActive(n));
   }
 
   // Step relative to what's ON SCREEN, not to a cursor held elsewhere — so the
@@ -154,13 +194,15 @@
   function tick() {
     const period = currentPeriod();
     if (override && override.periodId !== period.id) override = null; // expired
-    const want = override ? override.view : period.view;
+    let want = override ? override.view : period.view;
+    if (!isActive(want)) want = window.OFF_VIEW;   // gated shut: fall through
     if (want !== shownView) render(want);
   }
 
   // Set a manual override, held until the current period ends.
   function setOverride(name) {
     if (!name || !window.VIEWS[name]) return;
+    if (!isActive(name)) return;       // gated shut: nothing to show, so refuse
     override = { view: name, periodId: currentPeriod().id };
     publish(TOPICS.override, JSON.stringify(override), true);
     tick();
@@ -199,7 +241,7 @@
       // Advertise the cycle so anything else (Node-RED debug, a dashboard)
       // can see the view list without being told about it.
       publish(TOPICS.views, JSON.stringify(cycle()), true);
-      client.subscribe([TOPICS.set, TOPICS.override, TOPICS.command]);
+      client.subscribe([TOPICS.set, TOPICS.override, TOPICS.command].concat(gateTopics()));
       tick();
     });
     client.on("offline", () => showOverlay("offline", "Panel offline",
@@ -209,6 +251,22 @@
 
     client.on("message", (topic, payload) => {
       const msg = payload.toString();
+
+      if (gateTopics().indexOf(topic) !== -1) {   // a view's gate opened or shut
+        gates[topic] = msg;
+        publish(TOPICS.views, JSON.stringify(cycle()), true);   // rotation changed
+        // If what is on screen just went inactive, hand back to the schedule
+        // rather than leaving a stale page up.
+        if (shownView && !isActive(shownView)) {
+          if (override && override.view === shownView) {
+            override = null;
+            publish(TOPICS.override, "", true);
+          }
+          shownView = null;                      // force tick() to re-render
+          tick();
+        }
+        return;
+      }
 
       if (topic === TOPICS.override) {           // retained override -> restore
         try { override = msg ? JSON.parse(msg) : null; } catch { override = null; }

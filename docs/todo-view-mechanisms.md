@@ -3,8 +3,10 @@
 Cross-cutting plumbing that several planned views need. Worth building once,
 before the views that depend on it.
 
-**Status:** not started. Unblocks `todo-printer.md`, `todo-server-status.md`,
-and anything else that is only sometimes relevant.
+**Status:** conditional views **built and deployed (2026-09-07)** — see below.
+The alert takeover and the tiles renderer are still open. Unblocks
+`todo-printer.md`, `todo-server-status.md`, and anything else that is only
+sometimes relevant.
 
 ---
 
@@ -29,31 +31,47 @@ curl -sSI -H "Origin: null" <url> | grep -i access-control-allow-origin
 The second path is also the answer whenever a credential is involved. A key in
 `config.js` is a key in page source; a key in Node-RED stays on the Pi.
 
-## Conditional views
+## Conditional views — DONE
 
-`views.js` is a static list today and `app.js` derives the arrow rotation from
-it. A printer view, an alert view, a "guests arriving" view - all of these are
+Built for the agent canvas and deliberately general. `views.js` was a static
+list; `app.js` derives the arrow rotation from it. A printer view, an alert view, a "guests arriving" view - all of these are
 dead weight in the rotation most of the time.
 
-Proposal: let a view be gated on a retained MQTT topic.
+A view can now be gated on a retained MQTT topic:
 
 ```js
 printer: {
   url: "printer.html",
-  activeWhen: "wallpanel/printer/state",   // in rotation only while truthy
+  activeWhen: "printer/state",                    // present and non-empty
+}
+canvas: {
+  url: "canvas.html",
+  activeWhen: { topic: "canvas", test: fn },      // ...and fn(payload) is truthy
 }
 ```
+
+The topic is **relative to the same base as every other topic**, so `views.js`
+still carries no absolute topics — the same reason LAN hosts live in
+`config.js`. The optional `test` lives in `views.js` rather than `app.js`,
+because it is a property of the view and `app.js` should not learn any view's
+payload schema. A test that throws counts as "not usable" rather than
+propagating out of `cycle()`.
 
 `cycle()` in `app.js` already filters on `cycle !== false`; this is the same
 filter with a second condition, plus a subscription so the rotation updates
 live. Keep the derived-at-runtime property: no view names in Node-RED.
 
-Edge cases to handle deliberately:
+Edge cases handled, and verified on the real panel:
 
-- Gate topic missing entirely -> treat as inactive, not as an error.
-- The currently-shown view goes inactive -> fall back to the schedule rather
-  than leaving a stale page up.
-- Everything inactive -> the schedule and `OFF_VIEW` still apply.
+- Gate topic missing or cleared -> inactive, not an error.
+- The currently-shown view goes inactive -> the override is dropped and the
+  panel falls back to the schedule rather than leaving a stale page up.
+- `view/set <name>` is **refused** while a gate is shut, so a view that cannot
+  render cannot be summoned by name either.
+- `tick()` falls through to `OFF_VIEW` if the view it was about to show is
+  gated shut.
+- The advertised rotation on `wallpanel/views` updates live as gates open and
+  shut, so it always reflects what the arrows will actually do.
 
 ## Alert takeover
 

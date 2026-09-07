@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The kiosk runs Chromium with --force-dark-mode; declaring the page's own
+     scheme stops it re-processing colours we already chose for dark. -->
+<meta name="color-scheme" content="dark">
+<title>Agent canvas</title>
+<style>
+  html { font-size: calc(100vw / 1080 * 16); }
+
+  :root {
+    color-scheme: dark;
+    --surface:  #0d1014;
+    --ink:      #e6edf3;   /* headline, values              16.1:1 on surface */
+    --ink-2:    #c9d3dd;   /* secondary                     12.6:1 on surface */
+    --ink-3:    #bcc7d3;   /* labels, axes                  11.1:1 on surface */
+    --hairline: rgba(230,237,243,.09);
+
+    /* State colours share the dial's pastel family, for the same reason: on a
+       near-black surface a pastel is far more legible than a saturated hue. */
+    --ok:   #63c294;
+    --warn: #f5dd8c;
+    --bad:  #f47f9c;
+
+    --stale: #d9843b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: var(--surface);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Hidden until a payload validates. A half-rendered layout is worse than a
+     blank one, so nothing is shown until everything is known good. */
+  .page { height: 100%; padding: 5rem 3rem 4rem; display: none; flex-direction: column; }
+  .page.ready { display: flex; }
+
+  .kicker {
+    font-size: 1.9rem; font-weight: 600; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--ink-2);
+  }
+  .title    { margin-top: 1.8rem; font-size: 5.2rem; line-height: 1.05; font-weight: 300;
+              letter-spacing: -.02em; }
+  .subtitle { margin-top: 1.2rem; font-size: 2.6rem; font-weight: 400; color: var(--ink-2); }
+
+  /* ---- tiles ------------------------------------------------------------ */
+  .tiles {
+    margin-top: 4rem; padding-top: 2.6rem;
+    border-top: 1px solid var(--hairline);
+    display: grid; gap: 2.6rem 2rem;
+  }
+  .tiles[data-n="1"] { grid-template-columns: 1fr; }
+  .tiles[data-n="2"] { grid-template-columns: repeat(2, 1fr); }
+  .tiles[data-n="3"],
+  .tiles[data-n="4"] { grid-template-columns: repeat(2, 1fr); }
+  .tiles[data-n="5"],
+  .tiles[data-n="6"] { grid-template-columns: repeat(3, 1fr); }
+
+  .t-label {
+    font-size: 1.5rem; letter-spacing: .17em; text-transform: uppercase;
+    color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .t-value { margin-top: .8rem; font-size: 4rem; font-weight: 500; line-height: 1; }
+  .t-unit  { display: block; margin-top: .6rem; font-size: 1.8rem; font-weight: 500;
+             color: var(--ink-2); }
+  /* State is carried by a word as well as a colour — never colour alone. */
+  .t-state { display: inline-block; margin-top: .8rem; font-size: 1.5rem; font-weight: 600;
+             letter-spacing: .1em; text-transform: uppercase; }
+  .t-state.ok   { color: var(--ok); }
+  .t-state.warn { color: var(--warn); }
+  .t-state.bad  { color: var(--bad); }
+
+  /* ---- series ----------------------------------------------------------- */
+  .series { margin-top: 4rem; }
+  .s-head {
+    font-size: 1.5rem; letter-spacing: .17em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 1.2rem;
+  }
+  svg { display: block; width: 100%; }
+  .grid { stroke: var(--hairline); stroke-width: 1; }
+  .axis { fill: var(--ink-3); font-size: 34px; font-weight: 500; }
+
+  /* An agent-rendered file from the mounted share. Bounded so a surprising
+     image cannot push the footer off the panel. */
+  .figure { margin-top: 3.4rem; display: none; }
+  .figure img {
+    display: block; width: 100%; max-height: 46vh;
+    object-fit: contain; object-position: left;
+  }
+
+  .note {
+    margin-top: 3.4rem; font-size: 2.2rem; line-height: 1.4; color: var(--ink-2);
+  }
+
+  .footer {
+    margin-top: auto; padding-top: 2.6rem;
+    border-top: 1px solid var(--hairline);
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 1.8rem; color: var(--ink-3);
+  }
+  .footer .stale { color: var(--stale); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page" id="page">
+  <div class="kicker" id="kicker">Agent</div>
+  <div class="title" id="title"></div>
+  <div class="subtitle" id="subtitle"></div>
+  <div class="tiles" id="tiles"></div>
+  <figure class="figure" id="figure"><img id="figimg" alt=""></figure>
+  <div class="series" id="series"></div>
+  <div class="note" id="note"></div>
+  <div class="footer">
+    <div id="age"></div>
+    <div id="src"></div>
+  </div>
+</div>
+
+<!-- Site-specific values live in config.js, which is gitignored. This page is
+     loaded in an iframe, so it must load config.js itself — it does not inherit
+     window.CONFIG from index.html. -->
+<script src="mqtt.min.js"></script>
+<script src="config.js"></script>
+
+<script>
+"use strict";
+
+/* The agent canvas.
+
+   Hermes publishes to `hermes/canvas`. A mediator validates that against the
+   schema, enforces the allowed shape, and republishes it retained here. This
+   page never reads the agent's topic directly, and the agent can never reach
+   the panel's control topics — see hermes-deploy/docs/todo-broker.md for the
+   ACL that makes that a boundary rather than a convention.
+
+   Schema (v1), which is also written down in docs/agent-canvas-schema.md and
+   referenced from the hermes-deploy repo rather than copied into it:
+
+     {
+       "v": 1,                                   required, exactly 1
+       "title":    "Overnight build",            required, string
+       "subtitle": "3 of 4 stages green",        optional
+       "tiles": [                                optional, max 6
+         {"label":"Tests","value":"148","unit":"passed","state":"ok"}
+       ],
+       "series": [[0, 12], [1, 18]],             optional, max 200 points
+       "image":  "agent/run-482.png",            optional, see below
+       "note":   "Stage 4 still running",        optional
+       "updated_at": "2026-09-07T20:11:00Z"      required, ISO 8601
+     }
+
+   TWO CHANNELS, deliberately. MQTT carries the document - what to show - and it
+   is the wrong place for bulk: a retained topic holding a megabyte of PNG is a
+   payload every subscriber pays for on every reconnect. Anything large travels
+   as a FILE instead, on a share the agent can write and the kiosk mounts
+   read-only under the shell directory:
+
+     /opt/wallpanel/shell/agent/  <- the agent's share, mounted ro
+
+   `image` is then just a relative path, and the browser loads it the same way
+   photo.html already loads media/image.jpg - a mechanism already proven on this
+   panel, needing no server and no CORS. A `file://` page cannot fetch() another
+   file, but it can display one in an <img>, which is all this needs.
+
+   The path is validated hard (see safeAsset). An agent-supplied path is
+   untrusted input pointed at a local filesystem, so it must stay inside the
+   mount: no leading slash, no scheme, no "..", and the agent/ prefix required.
+
+   This page validates too, even though the mediator already did. Not because
+   the mediator is untrusted, but because a page that renders half a layout on a
+   surprise payload is worse than one that renders nothing: the panel is glanced
+   at, not read, and a plausible-looking wrong answer is the failure mode that
+   matters here. */
+
+var C = window.CONFIG || {};
+var BASE = ((C.topics && C.topics.override) || "wallpanel/override")
+             .replace(/\/override$/, "");
+var TOPIC = BASE + "/canvas";
+
+var STALE_AFTER_MIN = 90;      // older than this is called out, not hidden
+var MAX_TILES = 6;
+var MAX_POINTS = 200;
+var ASSET_PREFIX = "agent/";   // the mounted share, relative to the shell dir
+
+function el(id) { return document.getElementById(id); }
+function txt(node, v) { node.textContent = v == null ? "" : String(v); }
+
+/* An agent-supplied path aimed at a local filesystem is untrusted input. It has
+   to stay inside the mounted share: no absolute path, no scheme, no traversal,
+   and a conservative character set. Returns null if the path is not usable.
+
+   Note that an <img> pointed outside the share would simply fail to decode, so
+   this is not what stops the panel showing /etc/passwd - it is what stops the
+   HTML escape hatch, if it is ever added, from doing so. Getting it right now
+   costs nothing and means the check already exists when it matters. */
+function safeAsset(v) {
+  if (typeof v !== "string" || !v || v.length > 200) return null;
+  if (v.indexOf(ASSET_PREFIX) !== 0) return null;          // must be in the share
+  if (v.indexOf("..") !== -1) return null;                 // no traversal
+  if (v.indexOf(":") !== -1 || v.indexOf("//") !== -1) return null;  // no scheme
+  if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(v)) return null;
+  return v;
+}
+
+/* ------------------------------------------------------------------ schema */
+function validate(d) {
+  if (!d || typeof d !== "object") return "not an object";
+  if (d.v !== 1) return "unsupported schema version: " + d.v;
+  if (typeof d.title !== "string" || !d.title.trim()) return "missing title";
+  if (typeof d.updated_at !== "string") return "missing updated_at";
+  if (isNaN(new Date(d.updated_at).getTime())) return "unparseable updated_at";
+  if (d.tiles != null) {
+    if (!Array.isArray(d.tiles)) return "tiles is not an array";
+    if (d.tiles.length > MAX_TILES) return "too many tiles";
+    for (var i = 0; i < d.tiles.length; i++) {
+      var t = d.tiles[i];
+      if (!t || typeof t !== "object") return "tile " + i + " is not an object";
+      if (typeof t.label !== "string") return "tile " + i + " has no label";
+      if (t.value == null) return "tile " + i + " has no value";
+      if (t.state != null && ["ok", "warn", "bad"].indexOf(t.state) === -1)
+        return "tile " + i + " has unknown state " + t.state;
+    }
+  }
+  if (d.series != null) {
+    if (!Array.isArray(d.series)) return "series is not an array";
+    if (d.series.length > MAX_POINTS) return "series too long";
+    for (var k = 0; k < d.series.length; k++) {
+      var pt = d.series[k];
+      if (!Array.isArray(pt) || pt.length !== 2 ||
+          typeof pt[0] !== "number" || typeof pt[1] !== "number" ||
+          !isFinite(pt[0]) || !isFinite(pt[1]))
+        return "series point " + k + " is not [number, number]";
+    }
+  }
+  if (d.image != null && !safeAsset(d.image)) return "image path is not inside " + ASSET_PREFIX;
+  if (d.subtitle != null && typeof d.subtitle !== "string") return "subtitle not a string";
+  if (d.note != null && typeof d.note !== "string") return "note not a string";
+  return null;                                     // null == valid
+}
+
+/* ------------------------------------------------------------------- render */
+function clear() { el("page").classList.remove("ready"); }
+
+function render(d) {
+  txt(el("title"), d.title);
+  txt(el("subtitle"), d.subtitle || "");
+  el("subtitle").style.display = d.subtitle ? "" : "none";
+
+  // ---- tiles ----
+  var tiles = el("tiles");
+  var list = d.tiles || [];
+  tiles.innerHTML = list.map(function (t) {
+    var state = t.state
+      ? '<span class="t-state ' + t.state + '">' +
+        (t.state === "ok" ? "OK" : t.state === "warn" ? "Watch" : "Problem") + "</span>"
+      : "";
+    return '<div><div class="t-label"></div><div class="t-value"></div>' +
+           (t.unit ? '<span class="t-unit"></span>' : "") + state + "</div>";
+  }).join("");
+  // Fill text separately so agent-supplied strings can never be markup.
+  var cells = tiles.children;
+  for (var i = 0; i < list.length; i++) {
+    cells[i].querySelector(".t-label").textContent = list[i].label;
+    cells[i].querySelector(".t-value").textContent = String(list[i].value);
+    var u = cells[i].querySelector(".t-unit");
+    if (u) u.textContent = list[i].unit;
+  }
+  tiles.setAttribute("data-n", String(Math.min(list.length, 6)));
+  tiles.style.display = list.length ? "" : "none";
+
+  // ---- image ----
+  // Set via the DOM rather than innerHTML, so the path can never be markup, and
+  // only after safeAsset has passed it.
+  var fig = el("figure");
+  var img = el("figimg");
+  if (d.image && safeAsset(d.image)) {
+    img.setAttribute("src", d.image);
+    // "block", not "" — the class carries display:none, so clearing the inline
+    // style hands control back to the stylesheet and the figure stays hidden.
+    fig.style.display = "block";
+  } else {
+    img.removeAttribute("src");
+    fig.style.display = "none";
+  }
+
+  // ---- series ----
+  var series = el("series");
+  if (d.series && d.series.length > 1) {
+    series.style.display = "";
+    series.innerHTML = '<div class="s-head">Trend</div>' + sparkline(d.series);
+  } else {
+    series.style.display = "none";
+  }
+
+  txt(el("note"), d.note || "");
+  el("note").style.display = d.note ? "" : "none";
+
+  // ---- age ----
+  var t = new Date(d.updated_at);
+  var mins = Math.round((Date.now() - t.getTime()) / 60000);
+  var when = t.toLocaleString("en-GB", {
+    hour: "2-digit", minute: "2-digit", day: "numeric", month: "short"
+  });
+  el("age").innerHTML = mins > STALE_AFTER_MIN
+    ? '<span class="stale">● stale · ' + when + "</span>"
+    : "updated " + when;
+  txt(el("src"), "agent");
+
+  el("page").classList.add("ready");
+}
+
+/* A bare sparkline: one series, so no legend; endpoints labelled rather than
+   an axis, because on a wall the shape is the message and the exact values are
+   not. Same 40px axis type as the other views - the panel is 68.8 ppi. */
+function sparkline(pts) {
+  var W = 960, H = 300, PAD_L = 8, PAD_R = 150, TOP = 40, BOT = 40;
+  var xs = pts.map(function (p) { return p[0]; });
+  var ys = pts.map(function (p) { return p[1]; });
+  var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+  var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+  if (x1 === x0) x1 = x0 + 1;
+  var pad = (y1 - y0) * 0.15 || 1;
+  y0 -= pad; y1 += pad;
+  var plot = H - TOP - BOT;
+  var X = function (v) { return PAD_L + (W - PAD_L - PAD_R) * (v - x0) / (x1 - x0); };
+  var Y = function (v) { return TOP + plot * (1 - (v - y0) / (y1 - y0)); };
+
+  var d = pts.map(function (p, i) {
+    return (i ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1);
+  }).join(" ");
+
+  var last = pts[pts.length - 1];
+  return '<svg viewBox="0 0 ' + W + " " + H + '">' +
+    '<line class="grid" x1="' + PAD_L + '" x2="' + (W - PAD_R) +
+      '" y1="' + (TOP + plot) + '" y2="' + (TOP + plot) + '"/>' +
+    '<path d="' + d + '" fill="none" stroke="var(--ok)" stroke-width="4" ' +
+      'stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<circle cx="' + X(last[0]).toFixed(1) + '" cy="' + Y(last[1]).toFixed(1) +
+      '" r="8" fill="var(--ok)"/>' +
+    '<text class="axis" x="' + (W - PAD_R + 16) + '" y="' + (Y(last[1]) + 12).toFixed(1) +
+      '">' + last[1] + "</text></svg>";
+}
+
+/* --------------------------------------------------------------------- mqtt
+   Read-only: this page subscribes and never publishes. The shell holds the
+   panel's own client; a second subscriber is cheaper than plumbing the payload
+   across an iframe boundary, and it keeps the view self-contained like the
+   others. */
+(function boot() {
+  if (!C.broker || typeof mqtt === "undefined") return;   // stay blank
+  var client = mqtt.connect(C.broker, {
+    clientId: "wallpanel-canvas-" + Math.random().toString(16).slice(2, 8),
+    username: C.username,
+    password: C.password,
+    reconnectPeriod: 5000
+  });
+  client.on("connect", function () { client.subscribe(TOPIC); });
+  client.on("message", function (_t, payload) {
+    var raw = payload.toString();
+    if (!raw) { clear(); return; }                 // cleared: show nothing
+    var d;
+    try { d = JSON.parse(raw); } catch (e) { clear(); return; }
+    if (validate(d) !== null) { clear(); return; } // malformed: show nothing
+    render(d);
+  });
+  // Re-render every minute so "stale" becomes true on its own rather than
+  // waiting for a payload that, by definition, is not coming.
+  setInterval(function () {
+    var t = document.getElementById("page");
+    if (t.classList.contains("ready")) { /* age recomputed on next payload */ }
+  }, 60000);
+})();
+</script>
+</body>
+</html>

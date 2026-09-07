@@ -1,47 +1,51 @@
 # View: agent canvas
 
-A page the Hermes agent can draw on - whatever it decides is worth showing.
+A page the Hermes agent can draw on — whatever it decides is worth showing.
 
-**Status:** not started. The interesting decision here is the contract, not the
-rendering.
+**Status: panel side built and deployed (2026-09-07).** The contract lives in
+[`agent-canvas-schema.md`](./agent-canvas-schema.md), which is the single source
+of truth and is referenced from the `hermes-deploy` repo rather than copied.
 
 ---
 
-## The contract is the whole design
+## Done, on this side
 
-Two options, and the choice determines whether the panel keeps looking like one
-thing:
+- `shell/canvas.html` — renders the v1 schema, validates it, and renders
+  **nothing** if it fails.
+- `activeWhen` gating in `shell/app.js` — see
+  [`todo-view-mechanisms.md`](./todo-view-mechanisms.md). The view joins the
+  arrow rotation only while a valid payload is present, falls back to the
+  schedule if the payload is cleared while it is on screen, and refuses
+  `view/set canvas` while the gate is shut.
+- `/opt/wallpanel/shell/agent/` created on the kiosk as the mount point for the
+  agent's share.
 
-**A constrained schema.** The agent publishes structured JSON; the page renders
-it with the panel's existing type scale, ink tokens and colour discipline:
+Verified on the real panel: no payload -> rotation is
+`["tapo","photo","overview"]`; a valid payload -> `[...,"canvas"]`; cleared ->
+back to the schedule and out of the rotation.
 
-```json
-{
-  "title": "Overnight build",
-  "subtitle": "3 of 4 stages green",
-  "tiles": [{"label": "Tests", "value": "148", "unit": "passed", "state": "ok"}],
-  "series": [[0, 12], [1, 18]],
-  "note": "Stage 4 still running"
-}
-```
+## Remaining, elsewhere
 
-**Arbitrary HTML in a sandboxed iframe.** Maximum flexibility, and every agent
-output becomes a design decision the agent is not equipped to make. Within a few
-days the panel has five visual languages.
+None of this is in this repo:
 
-Recommendation: **the schema, with HTML as an explicit escape hatch** for the
-rare case that genuinely needs it. If HTML is allowed at all, it must be
-`sandbox`ed - it is running on a page that holds broker credentials.
+- [ ] **Broker ACLs** — `hermes-deploy/docs/todo-broker.md`. Until then the
+      separation between the agent's topic and the panel's is a convention, not
+      a boundary.
+- [ ] **The mediator** — subscribe `hermes/canvas`, validate against the schema,
+      republish retained to `wallpanel/canvas`. Node-RED on the Pi is the
+      obvious home.
+- [ ] **The agent-side tool** — publish one JSON document to `hermes/canvas`.
+- [ ] **The share** — mount the agent's dataset read-only at
+      `/opt/wallpanel/shell/agent/`. Until it exists, `image` simply has nothing
+      to point at; the rest of the schema works without it.
 
-## Practical notes
+## Two things worth not relitigating
 
-- Publish retained, so the panel renders on load rather than waiting for the
-  agent's next thought.
-- Include a timestamp in the payload and show it. An agent canvas showing
-  yesterday's conclusion with no date is worse than a blank screen.
-- Gate it with `activeWhen` (`todo-view-mechanisms.md`) so it leaves the rotation
-  when the agent has nothing to say, rather than showing a stale panel forever.
-- Decide what happens when the payload is malformed: render nothing and drop out
-  of the rotation, never render half a layout.
-- Keep the agent's write scope to one topic prefix. It is another MQTT client on
-  a broker whose credential is already known to be weak.
+**The agent does not publish into `wallpanel/#`.** It publishes to its own
+prefix and a mediator republishes. That keeps the panel's control topics
+unreachable from the agent even if its credential leaks, and puts validation
+somewhere the agent cannot skip.
+
+**MQTT is not the channel for bulk.** The document travels as a retained topic;
+anything large travels as a file on the share. Putting an image in a retained
+payload makes every subscriber pay for it on every reconnect.
