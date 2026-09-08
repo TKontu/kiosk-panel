@@ -29,10 +29,47 @@ production on this panel, needing no server and no CORS. A `file://` page cannot
 `fetch()` another file, but it can display one in an `<img>`, which is all this
 needs.
 
+## Two lifecycles
+
+The agent has two canvases. They use the **same schema and the same renderer**,
+and differ only in how long they live and whether they interrupt.
+
+| | `persistentcanvas` | `ephemeralcanvas` |
+|---|---|---|
+| Topic | `canvas/persistent` | `canvas/ephemeral` |
+| Lives until | replaced or cleared — **no TTL** | its TTL lapses |
+| In the arrow rotation | yes | **never** |
+| On arrival | waits its turn | **takes over the panel immediately** |
+| Dismissable | n/a | yes, any button press |
+
+**They are independent and concurrent.** Neither clears, evicts or shadows the
+other: different topics, different gates, and the panel never publishes to
+either. An ephemeral canvas interrupts the *display* for its TTL and then hands
+back — if a persistent canvas was showing, that is what returns.
+
+`persistentcanvas` is a standing board: publish it and it stays, however old,
+until you publish over it or clear it. A stale one is *labelled* stale, never
+hidden.
+
+`ephemeralcanvas` is "look at this now". It seizes the wall, holds for its TTL,
+and vanishes with nothing needing to be published to end it.
+
+### Why the TTL runs from `updated_at`
+
+Expiry is `updated_at + ttl_s`, not arrival + ttl_s. The deadline is then the
+same wherever it is evaluated — the renderer, the shell's gate, or a panel that
+rebooted halfway through the window. It also means an ephemeral payload that
+expired while the panel was off **never shows at all**, rather than starting a
+fresh 30 minutes on boot.
+
+The gate carries the expiry, so there is no timer to keep and nothing to
+reconcile: an expired payload simply stops opening its gate.
+
 ## Topic flow
 
 ```
-agent  --publish-->  hermes/canvas  --[mediator: validate]-->  wallpanel/canvas (retained)  --> panel
+agent --publish--> hermes/canvas/persistent --[mediator]--> wallpanel/canvas/persistent --> panel
+agent --publish--> hermes/canvas/ephemeral  --[mediator]--> wallpanel/canvas/ephemeral  --> panel
 ```
 
 The agent **never publishes into `wallpanel/#`**. Two reasons, both structural:
@@ -41,6 +78,16 @@ The agent **never publishes into `wallpanel/#`**. Two reasons, both structural:
    unreachable from the agent even if its credential leaks. Otherwise a canvas
    capability quietly includes "change which view is on screen".
 2. Validation happens somewhere the agent cannot skip.
+
+### Dismissal, and why it exists
+
+An ephemeral canvas can hold the wall for up to its TTL. Without a way out, an
+agent could occupy the panel for half an hour and the remote would be useless —
+`on` clears an override, and a takeover is not an override.
+
+So **any button press dismisses the ephemeral canvas that is showing**. It
+dismisses *that payload*, not the topic and not the capability: the next
+payload the agent publishes takes over again as normal.
 
 ## Schema, v1
 
@@ -71,6 +118,7 @@ The agent **never publishes into `wallpanel/#`**. Two reasons, both structural:
 | `series` | no | array of `[number, number]`, **max 200** points. One series only. |
 | `image` | no | relative path inside `agent/` — see below |
 | `note` | no | string |
+| `ttl_s` | no | **ephemeral only.** Seconds, `0 < ttl_s ≤ 86400`. Default **1800** (30 min). Ignored on the persistent canvas, which has no TTL. |
 
 ### `image` paths
 
@@ -99,14 +147,20 @@ worse than an absent canvas.
   the panel returns to the schedule rather than leaving a stale page up.
 - **Not forceable.** `wallpanel/view/set canvas` is refused while the gate is
   shut, so a view that cannot render cannot be summoned.
-- **Staleness is shown, not hidden.** An old `updated_at` is labelled stale in
-  amber. A canvas showing yesterday's conclusion with no date is worse than a
-  blank screen.
+- **Staleness is shown, not hidden.** On the persistent canvas an old
+  `updated_at` is labelled stale in amber. A canvas showing yesterday's
+  conclusion with no date is worse than a blank screen. An ephemeral canvas
+  cannot be stale — it stops rendering instead, and its footer counts down
+  rather than counting up.
+- **The two never interfere.** Publishing one does not touch the other's topic,
+  its place in the rotation, or the manual override. An ephemeral takeover that
+  lapses returns to exactly what was showing before it.
 - **Text is never markup.** Agent-supplied strings are written with
   `textContent`, never `innerHTML`.
 
-To clear the canvas, publish an **empty retained** payload to
-`wallpanel/canvas` — the same idiom as clearing `wallpanel/override`.
+To clear either canvas, publish an **empty retained** payload to its topic —
+the same idiom as clearing `wallpanel/override`. An ephemeral one does not need
+clearing; it expires.
 
 ## Validated twice, deliberately
 

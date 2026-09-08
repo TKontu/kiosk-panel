@@ -46,24 +46,50 @@ window.VIEWS = {
     rotate: 0,
   },
 
-  // Agent canvas. Hermes publishes to hermes/canvas; a mediator validates it
-  // and republishes here, retained, so the panel never reads the agent's topic
-  // directly and the agent can never reach the panel's control topics.
-  //
-  // Gated: in the rotation only while a payload is present and announces a
-  // schema version this shell understands. An agent with nothing to say, or a
-  // mediator that rejected the last payload, leaves the rotation rather than
-  // showing a blank page. The test is a shape check, not schema validation -
-  // validation belongs in the mediator, where the agent cannot skip it.
+  // ---- Agent canvas, two lifecycles ------------------------------------
+  // One renderer, two topics. Hermes publishes to hermes/canvas/<kind>; the
+  // mediator validates and republishes here. See docs/agent-canvas-schema.md.
+
+  // Persistent: the agent's standing board. In the arrow rotation while a valid
+  // payload is present, and stays until replaced or cleared.
   canvas: {
-    url: "canvas.html",
+    url: "canvas.html?src=canvas/persistent",
     rotate: 0,
     activeWhen: {
-      topic: "canvas",
+      topic: "canvas/persistent",
       test: function (payload) {
         try {
           var d = JSON.parse(payload);
           return !!d && d.v === 1;
+        } catch (e) { return false; }
+      },
+    },
+  },
+
+  // Ephemeral: "look at this now". Takes over the panel the moment it arrives,
+  // holds for its TTL, then vanishes and the panel returns to whatever it was
+  // doing. Deliberately NOT in the arrow rotation - it interrupts, it is not
+  // something you browse to - and any button press dismisses it.
+  //
+  // The gate carries the expiry, so nothing has to publish to end it and a
+  // payload that expired while the panel was off never shows at all.
+  canvasNow: {
+    url: "canvas.html?src=canvas/ephemeral",
+    rotate: 0,
+    cycle: false,
+    takeover: true,
+    activeWhen: {
+      topic: "canvas/ephemeral",
+      test: function (payload) {
+        try {
+          var d = JSON.parse(payload);
+          if (!d || d.v !== 1) return false;
+          var at = Date.parse(d.updated_at);
+          if (!isFinite(at)) return false;
+          // TTL runs from updated_at, not from arrival, so it is deterministic
+          // and survives a panel restart. Default 30 min.
+          var ttl = (typeof d.ttl_s === "number" && d.ttl_s > 0) ? d.ttl_s : 1800;
+          return Date.now() < at + ttl * 1000;
         } catch (e) { return false; }
       },
     },

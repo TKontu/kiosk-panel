@@ -73,6 +73,40 @@
     try { return !!g.test(payload); } catch (e) { return false; }
   }
 
+  // ---- Takeover ---------------------------------------------------------
+  // A view marked `takeover: true` outranks both the manual override and the
+  // schedule for as long as its gate is open. That is the whole mechanism: the
+  // gate IS the state, so there is no timer to keep and nothing to reconcile
+  // after a reboot - an ephemeral payload that expired while the panel was off
+  // simply never opens its gate.
+  //
+  // Dismissal matters more than it looks. Without it an agent could hold the
+  // wall for the length of its TTL with no way out, so any button press while a
+  // takeover is showing dismisses *that payload* - not the topic, not the view.
+  // The next payload takes over again as normal.
+  const dismissed = {};                // gate topic -> the payload dismissed
+
+  function takeoverView() {
+    const names = Object.keys(window.VIEWS);
+    for (let i = 0; i < names.length; i++) {
+      const n = names[i];
+      if (!window.VIEWS[n].takeover || !isActive(n)) continue;
+      const g = gateOf(n);
+      if (g && dismissed[g.topic] === gates[g.topic]) continue;   // this one, already waved off
+      return n;
+    }
+    return null;
+  }
+
+  // Called from the control handlers: whatever is on screen right now, if it is
+  // a takeover, stops outranking. Records the payload rather than the topic so
+  // a later payload is not pre-dismissed.
+  function dismissTakeover() {
+    if (!shownView || !window.VIEWS[shownView] || !window.VIEWS[shownView].takeover) return;
+    const g = gateOf(shownView);
+    if (g) dismissed[g.topic] = gates[g.topic];
+  }
+
   // ---- The cycle, derived from views.js ---------------------------------
   // Every view is in the arrow rotation unless it opts out with cycle:false or
   // its gate is closed. Order is the order they're declared in views.js.
@@ -194,7 +228,10 @@
   function tick() {
     const period = currentPeriod();
     if (override && override.periodId !== period.id) override = null; // expired
-    let want = override ? override.view : period.view;
+    // Precedence: takeover, then a manual override, then the schedule. Checked
+    // on every tick, so a takeover whose TTL has passed reverts on its own
+    // without anything needing to publish.
+    let want = takeoverView() || (override ? override.view : period.view);
     if (!isActive(want)) want = window.OFF_VIEW;   // gated shut: fall through
     if (want !== shownView) render(want);
   }
@@ -263,8 +300,8 @@
             publish(TOPICS.override, "", true);
           }
           shownView = null;                      // force tick() to re-render
-          tick();
         }
+        tick();          // always: a takeover may have just opened its gate
         return;
       }
 
@@ -275,6 +312,7 @@
       }
 
       if (topic === TOPICS.command) {            // intent from a controller
+        dismissTakeover();                       // a press means "not this, thanks"
         if (msg === "next")       setOverride(stepFrom(shownView, +1));
         else if (msg === "prev")  setOverride(stepFrom(shownView, -1));
         else if (msg === "blank") setOverride(window.OFF_VIEW);
@@ -282,6 +320,7 @@
       }
 
       if (topic === TOPICS.set) {                // explicit view by name
+        dismissTakeover();
         setOverride(msg);
       }
     });

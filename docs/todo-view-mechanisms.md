@@ -3,8 +3,8 @@
 Cross-cutting plumbing that several planned views need. Worth building once,
 before the views that depend on it.
 
-**Status:** conditional views **built and deployed (2026-09-07)** — see below.
-The alert takeover and the tiles renderer are still open. Unblocks
+**Status:** conditional views and the takeover are **built and deployed** — see
+below. The generic tiles renderer is still open. Unblocks
 `todo-printer.md`, `todo-server-status.md`, and anything else that is only
 sometimes relevant.
 
@@ -73,10 +73,25 @@ Edge cases handled, and verified on the real panel:
 - The advertised rotation on `wallpanel/views` updates live as gates open and
   shut, so it always reflects what the arrows will actually do.
 
-## Alert takeover
+## Takeover — DONE
 
-Any view can be pre-empted by a critical condition. This is what makes the panel
-useful when nobody is looking at it.
+Built for the ephemeral agent canvas, and general: a view marked
+`takeover: true` in `views.js` outranks both the manual override and the
+schedule for as long as its gate is open.
+
+**The gate is the state.** There is no timer and nothing to reconcile after a
+reboot — a payload whose deadline has passed simply never opens its gate, so it
+never shows. `tick()` re-evaluates on its existing 30 s cadence, which is how a
+takeover ends without anything publishing to end it.
+
+**Dismissal was the part worth getting right.** Without it an agent could hold
+the wall for the length of its TTL with no way out — `on` clears an override,
+and a takeover is not an override. Any button press dismisses the payload that
+is showing; a later payload takes over again as normal, because what is recorded
+is the payload, not the topic.
+
+An alert takeover for the homelab status view is now just another view with
+`takeover: true` — no new mechanism needed.
 
 Suggested contract: a retained `wallpanel/alert` carrying
 `{level, title, detail}`, empty to clear. `level: "critical"` takes over

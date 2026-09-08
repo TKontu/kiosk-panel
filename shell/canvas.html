@@ -181,7 +181,21 @@
 var C = window.CONFIG || {};
 var BASE = ((C.topics && C.topics.override) || "wallpanel/override")
              .replace(/\/override$/, "");
-var TOPIC = BASE + "/canvas";
+
+/* One renderer, two lifecycles. The topic comes from ?src= so views.js decides
+   which canvas this instance is, and neither page nor topic is duplicated:
+
+     canvas.html?src=canvas/persistent   the agent's standing board
+     canvas.html?src=canvas/ephemeral    "look at this now", expires
+
+   They are independent. A persistent canvas is untouched by an ephemeral one
+   arriving, and vice versa - different topics, different gates, and this page
+   never publishes. */
+var SRC = (new URLSearchParams(location.search).get("src") || "canvas/persistent")
+            .replace(/[^A-Za-z0-9_/-]/g, "");
+var TOPIC = BASE + "/" + SRC;
+var EPHEMERAL = /ephemeral/.test(SRC);
+var DEFAULT_TTL_S = 1800;              // 30 min, per the schema
 
 var STALE_AFTER_MIN = 90;      // older than this is called out, not hidden
 var MAX_TILES = 6;
@@ -238,11 +252,23 @@ function validate(d) {
         return "series point " + k + " is not [number, number]";
     }
   }
+  if (d.ttl_s != null &&
+      (typeof d.ttl_s !== "number" || !isFinite(d.ttl_s) || d.ttl_s <= 0 || d.ttl_s > 86400))
+    return "ttl_s must be a positive number of seconds, at most 86400";
   if (d.image != null && !safeAsset(d.image)) return "image path is not inside " + ASSET_PREFIX;
   if (d.subtitle != null && typeof d.subtitle !== "string") return "subtitle not a string";
   if (d.note != null && typeof d.note !== "string") return "note not a string";
   return null;                                     // null == valid
 }
+
+function ttlOf(d) {
+  return (typeof d.ttl_s === "number" && d.ttl_s > 0) ? d.ttl_s : DEFAULT_TTL_S;
+}
+/* The TTL runs from updated_at rather than from arrival, so the deadline is the
+   same wherever it is evaluated - this page, the shell's gate, or a panel that
+   rebooted halfway through. */
+function expiresAt(d) { return Date.parse(d.updated_at) + ttlOf(d) * 1000; }
+function expired(d)   { return Date.now() >= expiresAt(d); }
 
 /* ------------------------------------------------------------------- render */
 function clear() { el("page").classList.remove("ready"); }
@@ -307,10 +333,19 @@ function render(d) {
   var when = t.toLocaleString("en-GB", {
     hour: "2-digit", minute: "2-digit", day: "numeric", month: "short"
   });
-  el("age").innerHTML = mins > STALE_AFTER_MIN
-    ? '<span class="stale">● stale · ' + when + "</span>"
-    : "updated " + when;
-  txt(el("src"), "agent");
+  if (EPHEMERAL) {
+    // Age is not the useful fact here - how long it has left is. A stale
+    // ephemeral cannot exist: it stops rendering instead.
+    var left = Math.max(0, Math.round((expiresAt(d) - Date.now()) / 60000));
+    el("age").textContent = "until " +
+      new Date(expiresAt(d)).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) +
+      " · " + left + " min left";
+  } else {
+    el("age").innerHTML = mins > STALE_AFTER_MIN
+      ? '<span class="stale">● stale · ' + when + "</span>"
+      : "updated " + when;
+  }
+  txt(el("src"), EPHEMERAL ? "agent · now" : "agent");
 
   el("page").classList.add("ready");
 }
@@ -352,6 +387,8 @@ function sparkline(pts) {
    panel's own client; a second subscriber is cheaper than plumbing the payload
    across an iframe boundary, and it keeps the view self-contained like the
    others. */
+var latest = null;
+
 (function boot() {
   if (!C.broker || typeof mqtt === "undefined") return;   // stay blank
   var client = mqtt.connect(C.broker, {
@@ -363,18 +400,23 @@ function sparkline(pts) {
   client.on("connect", function () { client.subscribe(TOPIC); });
   client.on("message", function (_t, payload) {
     var raw = payload.toString();
-    if (!raw) { clear(); return; }                 // cleared: show nothing
+    if (!raw) { latest = null; clear(); return; }  // cleared: show nothing
     var d;
     try { d = JSON.parse(raw); } catch (e) { clear(); return; }
     if (validate(d) !== null) { clear(); return; } // malformed: show nothing
+    if (EPHEMERAL && expired(d)) { clear(); return; }
+    latest = d;
     render(d);
   });
-  // Re-render every minute so "stale" becomes true on its own rather than
-  // waiting for a payload that, by definition, is not coming.
+  // Re-evaluate every 20 s against the clock rather than against traffic: a
+  // TTL lapsing and a payload going stale are both things that happen when
+  // nothing arrives, which is exactly when an event-driven page would sit
+  // there showing the wrong thing.
   setInterval(function () {
-    var t = document.getElementById("page");
-    if (t.classList.contains("ready")) { /* age recomputed on next payload */ }
-  }, 60000);
+    if (!latest) return;
+    if (EPHEMERAL && expired(latest)) { clear(); return; }
+    render(latest);
+  }, 20000);
 })();
 </script>
 </body>

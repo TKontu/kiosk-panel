@@ -11,7 +11,12 @@ of truth and is referenced from the `hermes-deploy` repo rather than copied.
 ## Done, on this side
 
 - `shell/canvas.html` — renders the v1 schema, validates it, and renders
-  **nothing** if it fails.
+  **nothing** if it fails. One renderer serves both canvases; `?src=` picks the
+  topic.
+- **Two lifecycles**: `persistentcanvas` (standing board, no TTL, in the
+  rotation) and `ephemeralcanvas` (takes over on arrival, expires, never in the
+  rotation, dismissable with any button press). Independent and concurrent —
+  neither touches the other.
 - `activeWhen` gating in `shell/app.js` — see
   [`todo-view-mechanisms.md`](./todo-view-mechanisms.md). The view joins the
   arrow rotation only while a valid payload is present, falls back to the
@@ -21,8 +26,10 @@ of truth and is referenced from the `hermes-deploy` repo rather than copied.
   agent's share.
 
 Verified on the real panel: no payload -> rotation is
-`["tapo","photo","overview"]`; a valid payload -> `[...,"canvas"]`; cleared ->
-back to the schedule and out of the rotation.
+`["tapo","photo","overview"]`; a persistent payload -> `[...,"canvas"]`; an
+ephemeral payload takes over immediately while the persistent one *stays in the
+rotation*; when the TTL lapses the panel returns on its own with nothing
+published to end it.
 
 ## Remaining, elsewhere
 
