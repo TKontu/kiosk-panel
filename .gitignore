@@ -19,3 +19,6 @@ shell/media/
 # workflow, not panel code, and settings.local.json carries paths from other
 # projects. Kept out of a public repo.
 .claude/
+
+# Handoff notes for the next session (gitignored)
+HANDOFF.md

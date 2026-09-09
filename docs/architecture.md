@@ -123,6 +123,36 @@ restrictions from `file://` in Chromium and would need a local server or a
 flag; globals just work off disk. Load order (set in `index.html`):
 `mqtt.min.js → config.js → views.js → schedule.js → app.js`.
 
+### What the overlay says when the connection fails
+
+The overlay names the cause, and the distinction it draws is **did the broker
+answer**. That matters because the two halves have unrelated fixes:
+
+| Overlay | Meaning | Where the fix is |
+|---|---|---|
+| Broker rejected the credentials | CONNACK 4 | `config.js` |
+| Broker refused the connection | CONNACK 5 | the ACL for that user |
+| Broker refused the protocol version / rejected the client id | CONNACK 1, 2 | the broker |
+| Broker is not accepting connections yet | CONNACK 3 | nothing; it is starting |
+| **Lost the broker** | connected once, then dropped | usually nothing — a restart or a blip |
+| **Can't reach the broker** | never connected | address, port, or the websockets listener |
+
+Two traps are baked into the implementation, both learned the hard way:
+
+- **mqtt.js emits `error` with the specific cause and then `offline` a moment
+  later.** One message per event means the second, generic one always overwrites
+  the first, useful one. `fault` in `app.js` is what carries the cause across —
+  do not "simplify" the two handlers back into one.
+- **A browser will not say why a WebSocket failed.** Refused, wrong port and no
+  route are the same opaque event, by design. So "can't reach" is the *only*
+  honest thing to say without a CONNACK, and the client's own message is kept as
+  a footnote rather than promoted to the headline, where it reads as a diagnosis
+  it has not earned.
+
+Before this, every failure read `Can't reach the broker at ws://…`, including a
+broker that was up and answering. That wording sent one debugging session after
+the SMB mount, which had nothing to do with it.
+
 ### The stage model (why views don't visibly rotate)
 
 A view has two properties that must change **together**: its content (iframe

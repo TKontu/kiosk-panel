@@ -297,6 +297,86 @@
     stack.classList.remove("hidden");
   }
 
+  // ---- Why the connection failed ----------------------------------------
+  /* Every failure here used to read "Can't reach the broker at ...", which is
+     true of exactly one of the causes below. It has already sent one debugging
+     session after the wrong subsystem: the broker was up, answering, and had
+     merely restarted. What the panel can distinguish, it now says.
+
+     The distinction that matters is *did the broker answer*. A rejected
+     credential, a refused protocol version and an ACL denial all mean the
+     network path is fine and the fix is in config.js or on the broker; only
+     silence means the address, the port or the service is wrong. */
+
+  let everConnected = false;   // has this page ever completed a connection?
+  let fault = null;            // the specific cause, when the broker gave one
+  let lastMessage = null;      // the client's own words, when there is nothing better
+  let attempts = 0;
+
+  function esc(t) {
+    return String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  }
+
+  // CONNACK return codes, MQTT 3.1.1 section 3.2.2.3. mqtt.js puts the code on
+  // the error it emits. Each one has a different fix, so each gets its own words.
+  const CONNACK = {
+    1: ["Broker refused the protocol version",
+        "It answered, so the address and port are right. It will not speak this "
+        + "MQTT version."],
+    2: ["Broker rejected the client id",
+        "It answered, so the address and port are right. The id this page "
+        + "generated was not acceptable to it."],
+    3: ["Broker is not accepting connections yet",
+        "It answered and reported itself unavailable &mdash; usually a broker "
+        + "still starting up. This should clear on its own."],
+    4: ["Broker rejected the credentials",
+        "It answered, so the network path is fine. It refused the user "
+        + "<code>{user}</code>. Fix <code>username</code> or <code>password</code> "
+        + "in <code>config.js</code>."],
+    5: ["Broker refused the connection",
+        "It answered, so the network path is fine, but it will not authorise "
+        + "<code>{user}</code>. Usually the ACL for that user rather than the "
+        + "password."],
+  };
+
+  function noteFault(e) {
+    const known = CONNACK[e && e.code];
+    if (known) {
+      fault = { head: known[0], det: known[1].replace("{user}", esc(C.username)) };
+      return;
+    }
+    /* No CONNACK, so the broker never answered. A browser deliberately hides
+       why a WebSocket failed - refused, wrong port and no route are all the
+       same opaque event - so there is nothing more specific to say than the
+       reachability text below. Keep the client's message as a footnote rather
+       than promoting it to the headline, where it reads as a diagnosis. */
+    fault = null;
+    lastMessage = (e && (e.message || e.type)) || null;
+  }
+
+  function showFault() {
+    const retry = " Retrying every 3 s"
+      + (attempts > 1 ? " &mdash; " + attempts + " attempts so far." : ".");
+
+    if (fault) { showOverlay("offline", fault.head, fault.det + retry); return; }
+
+    if (everConnected) {
+      showOverlay("offline", "Lost the broker",
+        "The connection to <code>" + esc(C.broker) + "</code> dropped. It was "
+        + "working, so this is a broker restart or a network blip rather than "
+        + "anything to fix here." + retry);
+      return;
+    }
+
+    showOverlay("offline", "Can't reach the broker",
+      "No answer from <code>" + esc(C.broker) + "</code>, and this page has not "
+      + "connected once. Check that the broker is running and that its "
+      + "<em>websockets</em> listener is on that port &mdash; the panel speaks "
+      + "MQTT over WebSocket, not plain 1883."
+      + (lastMessage ? " The client reported: " + esc(lastMessage) + "." : "")
+      + retry);
+  }
+
   // ---- MQTT -------------------------------------------------------------
   function publish(topic, payload, retain) {
     if (client) client.publish(topic, payload, { retain: !!retain });
@@ -313,6 +393,10 @@
     });
 
     client.on("connect", () => {
+      everConnected = true;
+      fault = null;
+      lastMessage = null;
+      attempts = 0;
       publish(TOPICS.status, "online", true);
       // Advertise the cycle so anything else (Node-RED debug, a dashboard)
       // can see the view list without being told about it. tick() keeps it
@@ -321,10 +405,13 @@
       client.subscribe([TOPICS.set, TOPICS.override, TOPICS.command].concat(gateTopics()));
       tick();
     });
-    client.on("offline", () => showOverlay("offline", "Panel offline",
-      "Can't reach the broker at <code>" + C.broker + "</code>. Retrying."));
-    client.on("error", (e) => showOverlay("offline", "Connection problem",
-      String(e && e.message || e)));
+    /* mqtt.js reports the specific cause on `error` and then emits `offline` a
+       moment later. With one message per event the second, generic one always
+       overwrote the first, useful one - which is the whole bug. `fault` is what
+       carries the cause across. */
+    client.on("error", (e) => { noteFault(e); showFault(); });
+    client.on("offline", showFault);
+    client.on("reconnect", () => { attempts++; });
 
     client.on("message", (topic, payload) => {
       const msg = payload.toString();
