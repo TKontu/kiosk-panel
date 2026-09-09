@@ -46,10 +46,19 @@ several otherwise-obvious sources.
       Node-RED rather than a direct fetch.
 - [ ] **[Consumption against price](todo-energy-use.md)** — needs a P1/HAN reader
       or clamp meter. The one view with a direct payback.
-- [x] **[Agent canvas](todo-agent-canvas.md)** — panel side **built and
-      deployed**; contract in [`agent-canvas-schema.md`](agent-canvas-schema.md).
-      What remains is the broker ACL, the mediator and the agent-side tool, none
-      of which live in this repo.
+- [x] **[Agent canvas](todo-agent-canvas.md)** — **working end to end**
+      (2026-09-09). Contract in
+      [`agent-canvas-schema.md`](agent-canvas-schema.md). The broker ACL, the
+      Node-RED mediator and the agent-side publisher are all live; the agent
+      composes and publishes a card unaided when asked. Images work too: it
+      renders a PNG into the shared dataset and the kiosk mounts it read-only at
+      `shell/agent/`.
+- [ ] **[Agent-authored HTML](todo-agent-html.md)** — let the agent publish a
+      *page*, card or full-bleed, instead of only documents this repo knows how
+      to render. Panel owns style via a published `panel.css`; agent owns
+      structure. Reverses the "defer HTML" call in the schema doc, and argues
+      why: otherwise every new arrangement needs a change here, which makes this
+      repo the bottleneck on what the agent can say.
 - [ ] **[Frigate events](todo-frigate-events.md)** — recent detections rather
       than a live feed. Frigate already publishes to MQTT.
 
