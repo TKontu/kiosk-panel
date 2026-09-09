@@ -2,7 +2,9 @@
 
 Let the agent publish a page, not just a document the panel knows how to render.
 
-**Status:** not started. Reverses the "defer HTML" decision in
+**Status:** not started, but the delivery mechanism has been **tested** and the
+proposed controls corrected accordingly — see *What was measured* below. Reverses
+the "defer HTML" decision in
 [`agent-canvas-schema.md`](./agent-canvas-schema.md), so it argues rather than
 assumes. Raised from the `hermes-deploy` side.
 
@@ -64,7 +66,7 @@ through the file channel rather than the topic"*.
 ```
 agent writes  -> hermes-edit/report.html   (the share already mounted at agent/)
 publishes     -> {"v":1, "title":"…", "html":"agent/report.html"}
-panel renders -> <iframe sandbox src="agent/report.html">
+panel renders -> <iframe sandbox="allow-same-origin" src="agent/report.html">
 ```
 
 The existing `safeAsset` path validation already covers it — same rules as
@@ -92,6 +94,12 @@ fights.
 ever fill a rectangle someone else positioned — the same constraint the typed
 schema imposes, with nicer contents.
 
+A full-bleed iframe **cannot trap the panel**, which is worth stating because it
+is not obvious: the arrows, the schedule and the takeover all arrive over MQTT,
+not through the page. The agent can own every pixel and still not affect what the
+remote does. That is a payoff from the intent-based control model that only shows
+up here.
+
 **What `full` gives up.** In `card`, the panel's chrome plus the stylesheet keep
 everything looking like one system. In `full`, the agent owns the pixels: link
 the stylesheet and it stays consistent, ignore it and there are two visual
@@ -113,19 +121,71 @@ something.
 `title` and `updated_at` therefore stay required in both layouts — the rotation
 gate and the staleness check need them even when nothing renders them directly.
 
-## Three controls, none optional
+## The controls, as corrected by testing
 
-1. **`sandbox` with an empty allow-list.** No `allow-scripts`, no
-   `allow-same-origin`. The iframe gets an opaque origin and executes nothing, so
-   this page's broker credentials stay unreachable. This is what makes
-   agent-authored markup safe at all, and it answers the schema doc's own note
-   that HTML *"runs on a page holding broker credentials"*.
-2. **No external references.** Agent HTML may reference only `agent/` paths and
-   `panel.css`. Otherwise an `<img src="https://…">` beacons from the kiosk on
-   every rotation — a tracking pixel installed by its own owner. The mediator
-   checks this; resolution and policy is what a mediator is for.
-3. **A size cap** — a few hundred KB, so one runaway document cannot wedge the
-   panel.
+**1. `sandbox="allow-same-origin"`, and deliberately not an empty allow-list.**
+
+The first draft of this proposal specified an empty allow-list — no
+`allow-scripts`, no `allow-same-origin`. **That does not work on this panel.**
+The shell runs from `file://`, and a fully sandboxed frame gets an opaque origin
+which cannot load `file://` subresources *at all*: no stylesheet, no images. It
+was measured side by side, same document in both frames — the sandboxed one
+rendered as unstyled serif text with broken images.
+
+Which would have produced exactly the outcome this proposal exists to prevent:
+agent pages with no house style.
+
+`allow-same-origin` **without** `allow-scripts` is the working combination, and
+it gives up nothing: with no script execution there is no code to make use of the
+origin. Measured:
+
+| | result |
+| --- | --- |
+| stylesheet and local images | load |
+| a `<script>` in the agent's page | does not run |
+| `window.parent.document.title = …` from the frame | parent untouched |
+
+The schema doc's concern — that HTML *"runs on a page holding broker
+credentials"* — is answered by the absence of `allow-scripts`, not by the origin.
+
+**2. No external references — hygiene, and not enforceable where this proposal
+put it.**
+
+The first draft assigned this to the mediator. The mediator **cannot do it**:
+the HTML travels over SMB, not MQTT, so the mediator only ever sees the JSON
+document and never has the file. The same applies to the size cap below.
+
+Two browser-side fallbacks were tried and neither blocks it: the `csp` attribute
+on the iframe did not stop an external `<img>`, and the sandbox does not either.
+
+Before building something heavier, note the risk is smaller than it looks. The
+agent already has internet egress, so a beacon gives it no path it lacks; and the
+frame cannot read the parent, so it has nothing of the panel's to leak. The
+residual is "somebody learns the panel rendered at time T".
+
+So: **downgraded from mandatory to hygiene.** If it is ever wanted as a real
+control, the honest places are a validator where the file lands — accepting that
+the agent can rewrite it after the check — or the kiosk's own egress rules.
+Not the mediator.
+
+**3. A size cap** — a few hundred KB. Same enforcement gap as above: the
+mediator cannot see the file. Partly mitigated by the frame executing nothing, so
+an oversized document renders slowly rather than doing anything.
+
+## What was measured
+
+Fixture: a `file://` page with two iframes loading the same agent-style document,
+one sandboxed and one not, with a stylesheet, a local image, an external image
+and a script.
+
+- Empty `sandbox` → no stylesheet, no local image. **Mechanism broken.**
+- `sandbox="allow-same-origin"` → stylesheet and image load; script does not run;
+  parent unreachable. **Mechanism works, safety intact.**
+- External `<img>` requested under both, and under `csp="default-src 'self'"`.
+  **No browser-side control available.**
+
+Worth re-running if the kiosk ever stops serving the shell from `file://`; nearly
+all of the above is a consequence of that origin.
 
 ## Keep the typed schema as the fast path
 
@@ -140,10 +200,12 @@ typed blocks *or* an `html` reference. Both first-class.
 
 - [ ] Publish `shell/panel.css` — the house classes agent pages link. Derive it
       from the existing canvas styling so the two cannot drift.
-- [ ] `canvas.html`: render `html` in a sandboxed iframe; honour `layout`.
+- [ ] `canvas.html`: render `html` in an `allow-same-origin` iframe (no
+      `allow-scripts`); honour `layout`.
 - [ ] Staleness badge overlaid above the iframe in both layouts.
 - [ ] `agent-canvas-schema.md`: add `html` and `layout`; document the controls.
-- [ ] Mediator: reject external references, enforce the size cap.
+- [ ] Decide where, if anywhere, external references and the size cap are
+      enforced — **not the mediator**, which never sees the file.
 
 ## Not proposed
 

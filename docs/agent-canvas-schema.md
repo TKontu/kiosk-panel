@@ -247,11 +247,27 @@ skip it.
 
 ## Deferred: the HTML escape hatch
 
-Arbitrary HTML from the agent is **not** supported in v1, and should stay that
-way until the schema is demonstrably insufficient rather than merely inconvenient.
-Every agent output would otherwise become a design decision the agent is not
+Arbitrary HTML from the agent is **not** supported in v1. The original reasoning
+was that every agent output would become a design decision the agent is not
 equipped to make, and the panel would carry five visual languages within a week.
 
-If it is ever added: it must be `sandbox`ed (it runs on a page holding broker
-credentials), it must come through the file channel rather than the topic, and the
-existing `safeAsset` path check already covers pointing it at the right place.
+**That reasoning has been challenged, and the challenge is good.** See
+[`todo-agent-html.md`](./todo-agent-html.md): the objection assumes the agent also
+invents its own styling, which it need not — if the panel publishes a stylesheet
+and agent pages link it, the panel keeps style while the agent gains structure.
+Deferring is now a scheduling decision rather than a design one.
+
+If it is added, three things are already settled by measurement rather than
+argument:
+
+- **`sandbox="allow-same-origin"`, not an empty allow-list.** The shell runs from
+  `file://`, and a fully sandboxed frame gets an opaque origin that cannot load
+  `file://` subresources at all — no stylesheet, no images. Tested side by side.
+  Omitting `allow-scripts` is what keeps this page's broker credentials
+  unreachable; the origin is not doing that work, and withholding it only breaks
+  rendering.
+- **It comes through the file channel, not the topic**, and the existing
+  `safeAsset` check already covers pointing it at the right place.
+- **The mediator cannot police the markup.** The HTML travels over SMB and never
+  passes through MQTT, so any rule about its contents — external references, size
+  — has to be enforced somewhere that actually holds the file, or not claimed.
