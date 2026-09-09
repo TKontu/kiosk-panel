@@ -6,16 +6,12 @@
      scheme stops it re-processing colours we already chose for dark. -->
 <meta name="color-scheme" content="dark">
 <title>Overview</title>
+<link rel="stylesheet" href="panel.css">
 <style>
   html { font-size: calc(100vw / 1080 * 16); }
 
   :root {
     color-scheme: dark;
-    --surface:  #0d1014;
-    --ink:      #e6edf3;   /* hero, hour figures, hands     16.1:1 on surface */
-    --ink-2:    #c9d3dd;   /* symbols, secondary            12.6:1 on surface */
-    --ink-3:    #bcc7d3;   /* ticks, key                    11.1:1 on surface */
-    --hairline: rgba(230,237,243,.09);
 
     /* Bright on purpose. The panel is 68.8 ppi and read from 2-3 m; hierarchy
        here comes from size and weight, never from dimming text toward the

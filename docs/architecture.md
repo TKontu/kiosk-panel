@@ -383,10 +383,11 @@ show as bare track rather than as a hole.
   with it; once the price moved out, real hands became possible and the marker
   problem disappeared — the hands *are* the marker.
 
-> **Superseded:** `weather.html` and `electricity.html` were the two views this
-> replaced. They are still in the tree and in git history but are no longer in
-> `views.js`. `weather.html` has detail the dial deliberately drops (an hourly
-> temperature chart, a rain chart, sunrise/sunset) if you ever want it back.
+> **Superseded and removed (2026-09-09):** `weather.html` and `electricity.html`
+> were the two views the dial replaced. They sat unreferenced in the tree for a
+> while and are now deleted — recoverable from git history if the detail the dial
+> drops (an hourly temperature chart, a rain chart, sunrise/sunset) is ever
+> wanted back.
 
 ## Reading these views from across the room
 

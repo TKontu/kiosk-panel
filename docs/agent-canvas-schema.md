@@ -171,6 +171,8 @@ payload the agent publishes takes over again as normal.
 | `series` | no | array of `[number, number]`, **max 200** points. One series only. |
 | `image` | no | relative path inside `agent/` — see below |
 | `note` | no | string |
+| `html` | no | relative path inside `agent/` to a page the agent authored. **Mutually exclusive** with `tiles`, `series` and `image` — see below. |
+| `layout` | no | `card` (default) or `full`. Only meaningful with `html`. |
 | `ttl_s` | no | **ephemeral only.** Seconds, `0 < ttl_s ≤ 86400`. Default **1800** (30 min). Ignored on the persistent canvas, which has no TTL. |
 
 ### `image` paths
@@ -245,20 +247,83 @@ The gate in `views.js` performs a third, much weaker check — JSON parses and
 any view's payload schema, and the real validation belongs where the agent cannot
 skip it.
 
-## Deferred: the HTML escape hatch
+## Agent-authored HTML
 
-Arbitrary HTML from the agent is **not** supported in v1. The original reasoning
-was that every agent output would become a design decision the agent is not
-equipped to make, and the panel would carry five visual languages within a week.
+Implemented. `html` points at a page the agent wrote on the share; the panel
+renders it in an iframe and supplies the house style through `shell/panel.css`,
+which the agent's page links.
 
-**That reasoning has been challenged, and the challenge is good.** See
-[`todo-agent-html.md`](./todo-agent-html.md): the objection assumes the agent also
-invents its own styling, which it need not — if the panel publishes a stylesheet
-and agent pages link it, the panel keeps style while the agent gains structure.
-Deferring is now a scheduling decision rather than a design one.
+The division: **the panel owns style, the agent owns structure.** Consistency
+comes from the stylesheet rather than from the panel maintaining a list of
+permitted block types — which is why a new arrangement (a log tail, a table,
+something nobody has thought of) needs no change in this repo. Reasoning in
+[`todo-agent-html.md`](./todo-agent-html.md).
 
-If it is added, three things are already settled by measurement rather than
-argument:
+### Two layouts
+
+| | `card` (default) | `full` |
+|---|---|---|
+| The frame is | one block among the panel's own furniture | the whole viewport |
+| Panel chrome | title, subtitle, footer visible | hidden |
+| Your page should | **not** repeat the title — the panel renders it | carry its own heading |
+
+A full-bleed page cannot trap the panel: the arrows, the schedule and takeovers
+all arrive over MQTT rather than through the page, so the agent can own every
+pixel and still not affect the controls.
+
+### `sandbox="allow-same-origin"`, and why not an empty allow-list
+
+The frame is sandboxed **without** `allow-scripts`, which is what keeps this
+page's broker credentials unreachable — nothing executes, so there is no code to
+reach anything.
+
+`allow-same-origin` is present because it must be. The shell runs from `file://`,
+and a fully sandboxed frame gets an opaque origin that **cannot load `file://`
+subresources at all**: no stylesheet, no images. Measured side by side — the
+sandboxed frame rendered unstyled serif text with broken images. Withholding the
+origin buys no safety (there is no script to use it) and breaks the mechanism, so
+it is granted deliberately.
+
+Re-test this if the shell ever stops being served from `file://`; nearly all of
+it follows from that origin.
+
+### One body, not two
+
+`html` cannot be combined with `tiles`, `series` or `image`. Two bodies competing
+for the same space is a layout question nobody has answered, and silently
+dropping one would hide the mistake from whoever published it — so the payload is
+rejected instead, with a reason.
+
+The typed blocks remain the fast path: "show four numbers" should not require
+composing markup.
+
+### What is not enforced, and where that leaves things
+
+The proposal asked the mediator to reject external references and cap the file
+size. **It cannot**: the HTML travels over SMB and never passes through MQTT, so
+the mediator only ever sees the JSON document and never holds the file. Two
+browser-side fallbacks were tried and neither blocks an external `<img>` — the
+iframe `csp` attribute, and the sandbox itself.
+
+Left as hygiene rather than replaced with a heavier mechanism: the agent already
+has internet egress, so a beacon gives it no path it lacks, and the frame cannot
+read the parent, so it has nothing of the panel's to leak. If it is ever wanted
+as a real control, it belongs where the file lands or in the kiosk's egress
+rules.
+
+## Superseded: the deferred HTML escape hatch
+
+Kept for the record. HTML was originally deferred on the grounds that every
+agent output would become a design decision the agent is not equipped to make,
+and the panel would carry five visual languages within a week.
+
+That held **given its assumption** — that the agent would also invent its own
+styling. It need not: with the panel publishing a stylesheet, the panel keeps
+style and the agent gains structure. The objection was answered rather than
+overruled, which is why the feature above exists.
+
+Three things were settled by measurement rather than argument, and are now
+normative above:
 
 - **`sandbox="allow-same-origin"`, not an empty allow-list.** The shell runs from
   `file://`, and a fully sandboxed frame gets an opaque origin that cannot load

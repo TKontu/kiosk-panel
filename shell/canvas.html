@@ -6,24 +6,15 @@
      scheme stops it re-processing colours we already chose for dark. -->
 <meta name="color-scheme" content="dark">
 <title>Agent canvas</title>
+<link rel="stylesheet" href="panel.css">
 <style>
   html { font-size: calc(100vw / 1080 * 16); }
 
   :root {
     color-scheme: dark;
-    --surface:  #0d1014;
-    --ink:      #e6edf3;   /* headline, values              16.1:1 on surface */
-    --ink-2:    #c9d3dd;   /* secondary                     12.6:1 on surface */
-    --ink-3:    #bcc7d3;   /* labels, axes                  11.1:1 on surface */
-    --hairline: rgba(230,237,243,.09);
 
     /* State colours share the dial's pastel family, for the same reason: on a
        near-black surface a pastel is far more legible than a saturated hue. */
-    --ok:   #63c294;
-    --warn: #f5dd8c;
-    --bad:  #f47f9c;
-
-    --stale: #d9843b;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -94,6 +85,32 @@
     object-fit: contain; object-position: left;
   }
 
+  /* An agent-authored page. In `card` it is one block among the panel's own
+     furniture; in `full` it takes the viewport and the rest of .page is hidden.
+     Agent pages size themselves in absolute px (see panel.css), so the frame's
+     width does not distort their type the way a vw-based root would. */
+  .agent { display: none; margin-top: 3.4rem; }
+  .agent iframe {
+    display: block; width: 100%; height: 44vh; border: 0;
+    background: var(--surface);
+  }
+  .page.full { padding: 0; }
+  .page.full > *:not(.agent) { display: none; }
+  .page.full .agent { display: block; margin: 0; flex: 1; }
+  .page.full .agent iframe { height: 100vh; }
+
+  /* The one guarantee the panel keeps when the agent owns the pixels. Fixed, so
+     it sits above a full-bleed frame; the card layout leaves it to the footer,
+     which is visible there and already says it. */
+  .stale-badge {
+    position: fixed; top: 0; right: 0; z-index: 10;
+    margin: 1.6rem; padding: .7rem 1.4rem;
+    background: var(--surface); border: 2px solid var(--stale);
+    color: var(--stale); font-family: system-ui, sans-serif;
+    font-size: 1.8rem; font-weight: 600; letter-spacing: .06em;
+    border-radius: 999px;
+  }
+
   .note {
     margin-top: 3.4rem; font-size: 2.2rem; line-height: 1.4; color: var(--ink-2);
   }
@@ -114,6 +131,14 @@
   <div class="subtitle" id="subtitle"></div>
   <div class="tiles" id="tiles"></div>
   <figure class="figure" id="figure"><img id="figimg" alt=""></figure>
+  <div class="agent" id="agentwrap">
+    <!-- sandbox="allow-same-origin" WITHOUT allow-scripts. Measured: a fully
+         sandboxed frame gets an opaque origin and cannot load file://
+         subresources at all - no stylesheet, no images - which would defeat the
+         whole point. Omitting allow-scripts is what keeps this page's broker
+         credentials unreachable; the origin is not doing that work. -->
+    <iframe id="agentframe" sandbox="allow-same-origin" title="agent page"></iframe>
+  </div>
   <div class="series" id="series"></div>
   <div class="note" id="note"></div>
   <div class="footer">
@@ -121,6 +146,8 @@
     <div id="src"></div>
   </div>
 </div>
+
+<div class="stale-badge" id="staleBadge" hidden>● stale</div>
 
 <!-- Site-specific values live in config.js, which is gitignored. This page is
      loaded in an iframe, so it must load config.js itself — it does not inherit
@@ -151,6 +178,9 @@
        ],
        "series": [[0, 12], [1, 18]],             optional, max 200 points
        "image":  "agent/run-482.png",            optional, see below
+       "html":   "agent/report.html",            optional, mutually exclusive
+                                                 with tiles/series/image
+       "layout": "card" | "full",                optional, default "card"
        "note":   "Stage 4 still running",        optional
        "updated_at": "2026-09-07T20:11:00Z"      required, ISO 8601
      }
@@ -252,6 +282,19 @@ function validate(d) {
         return "series point " + k + " is not [number, number]";
     }
   }
+  if (d.html != null) {
+    if (!safeAsset(d.html)) return "html path is not inside " + ASSET_PREFIX;
+    // Either typed blocks or a page, never both: two bodies competing for the
+    // same space is a layout question nobody has answered, and silently
+    // dropping one would hide the mistake from whoever published it.
+    if (d.tiles != null || d.series != null || d.image != null)
+      return "html cannot be combined with tiles, series or image";
+  }
+  if (d.layout != null) {
+    if (["card", "full"].indexOf(d.layout) === -1)
+      return "layout must be \"card\" or \"full\"";
+    if (d.html == null) return "layout has no meaning without html";
+  }
   if (d.ttl_s != null &&
       (typeof d.ttl_s !== "number" || !isFinite(d.ttl_s) || d.ttl_s <= 0 || d.ttl_s > 86400))
     return "ttl_s must be a positive number of seconds, at most 86400";
@@ -315,6 +358,21 @@ function render(d) {
     fig.style.display = "none";
   }
 
+  // ---- agent-authored page ----
+  var wrap = el("agentwrap");
+  var frame = el("agentframe");
+  var full = d.html && d.layout === "full";
+  el("page").classList.toggle("full", !!full);
+  if (d.html && safeAsset(d.html)) {
+    // Set via the DOM, and only after safeAsset has passed the path, so an
+    // agent-supplied string can never become markup or escape the share.
+    if (frame.getAttribute("src") !== d.html) frame.setAttribute("src", d.html);
+    wrap.style.display = "block";
+  } else {
+    frame.removeAttribute("src");
+    wrap.style.display = "none";
+  }
+
   // ---- series ----
   var series = el("series");
   if (d.series && d.series.length > 1) {
@@ -333,6 +391,10 @@ function render(d) {
   var when = t.toLocaleString("en-GB", {
     hour: "2-digit", minute: "2-digit", day: "numeric", month: "short"
   });
+  // The badge is the promise that survives `full`, where the footer is hidden.
+  var badge = el("staleBadge");
+  badge.hidden = !(full && !EPHEMERAL && mins > STALE_AFTER_MIN);
+
   if (EPHEMERAL) {
     // Age is not the useful fact here - how long it has left is. A stale
     // ephemeral cannot exist: it stops rendering instead.

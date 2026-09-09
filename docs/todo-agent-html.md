@@ -2,8 +2,9 @@
 
 Let the agent publish a page, not just a document the panel knows how to render.
 
-**Status:** not started, but the delivery mechanism has been **tested** and the
-proposed controls corrected accordingly — see *What was measured* below. Reverses
+**Status: built and deployed (2026-09-09).** The contract is in
+[`agent-canvas-schema.md`](./agent-canvas-schema.md); this file keeps the
+argument and the measurements that shaped it. Reverses
 the "defer HTML" decision in
 [`agent-canvas-schema.md`](./agent-canvas-schema.md), so it argues rather than
 assumes. Raised from the `hermes-deploy` side.
@@ -198,14 +199,19 @@ typed blocks *or* an `html` reference. Both first-class.
 
 ## Tasks
 
-- [ ] Publish `shell/panel.css` — the house classes agent pages link. Derive it
-      from the existing canvas styling so the two cannot drift.
-- [ ] `canvas.html`: render `html` in an `allow-same-origin` iframe (no
-      `allow-scripts`); honour `layout`.
-- [ ] Staleness badge overlaid above the iframe in both layouts.
-- [ ] `agent-canvas-schema.md`: add `html` and `layout`; document the controls.
+- [x] `shell/panel.css` — house tokens and `.canvas` classes, in absolute px.
+      `overview.html` and `canvas.html` link it and no longer carry their own
+      copies of the tokens.
+- [x] `canvas.html`: renders `html` in an `allow-same-origin` iframe (no
+      `allow-scripts`); honours `layout`.
+- [x] Staleness badge — in `full`, where the panel's footer is hidden. In `card`
+      the footer is visible and already carries it, so the badge there would be
+      duplicate clutter. Narrower than this doc first proposed, deliberately.
+- [x] `agent-canvas-schema.md`: `html` and `layout` documented, sandbox finding
+      made normative.
 - [ ] Decide where, if anywhere, external references and the size cap are
-      enforced — **not the mediator**, which never sees the file.
+      enforced — **not the mediator**, which never sees the file. Currently
+      hygiene, not enforced anywhere.
 
 ## Not proposed
 

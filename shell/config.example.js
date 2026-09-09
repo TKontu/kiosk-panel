@@ -21,8 +21,8 @@ window.CONFIG = {
     frigate: "http://FRIGATE_HOST:5000",
   },
 
-  // Places weather.html can show. The FIRST entry is the default; the others are
-  // reachable as weather.html?place=<key>. Coordinates in decimal degrees —
+  // Places the overview dial can show. The FIRST entry is the default; the others are
+  // reachable as overview.html?place=<key>. Coordinates in decimal degrees —
   // rounding to 2 dp is plenty for a forecast and less precise about where you
   // live. Open-Meteo needs no API key.
   places: {

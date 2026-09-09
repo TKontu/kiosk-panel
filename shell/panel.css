@@ -1,0 +1,131 @@
+/* The house style.
+ *
+ * Two audiences:
+ *   1. The panel's own view pages, which link this for the design tokens.
+ *   2. Agent-authored pages, which link it and compose from the `.canvas`
+ *      classes below. That is the whole mechanism by which the panel keeps
+ *      its look while the agent decides the structure — see
+ *      docs/todo-agent-html.md.
+ *
+ * SIZES ARE ABSOLUTE PIXELS, DELIBERATELY.
+ *
+ * The panel's own pages size type with `font-size: calc(100vw / 1080 * 16)`,
+ * which is resolution-independent and correct for a page that fills the
+ * screen. It is wrong here: inside an iframe `vw` measures the IFRAME, not the
+ * panel, so an agent page in a 960 px card computes a 14.22 px root and renders
+ * 3rem as 42.7 px instead of 48 — measured, not guessed. Absolute pixels render
+ * identically whatever box the page lands in, and the panel is a fixed
+ * 1080x1920 device, so px is the honest unit.
+ *
+ * The scale below is built for that panel: 68.8 ppi, read from 2-3 m. Type that
+ * looks absurdly large in a browser at arm's length is correct on the wall.
+ * See docs/architecture.md.
+ *
+ * WRITING A PAGE FOR `layout: "card"`: the panel renders the document's `title`
+ * above your page as its own heading, so do NOT open with an <h1> repeating it —
+ * you get the title twice. Start at the content. In `layout: "full"` the panel
+ * shows no chrome at all, so there your page SHOULD carry its own heading.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --surface:  #0d1014;
+  --ink:      #e6edf3;   /* headlines, values             16.1:1 on surface */
+  --ink-2:    #c9d3dd;   /* secondary, units              12.6:1 on surface */
+  --ink-3:    #bcc7d3;   /* labels, axes, ticks           11.1:1 on surface */
+  --hairline: rgba(230,237,243,.09);
+
+  /* State. Pastels, for the same reason the dial uses them: on a near-black
+     surface a pastel is far more legible than a saturated hue. Never the only
+     carrier of meaning — pair with a word. */
+  --ok:    #63c294;
+  --warn:  #f5dd8c;
+  --bad:   #f47f9c;
+  --stale: #d9843b;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+/* ---------------------------------------------------------------------------
+ * Agent-page classes. Everything is scoped under .canvas so linking this file
+ * cannot disturb a panel page that happens to use the same class name.
+ * ------------------------------------------------------------------------- */
+
+.canvas {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  padding: 0;
+  line-height: 1.25;
+}
+
+.canvas h1 {
+  font-size: 76px; font-weight: 300; letter-spacing: -.02em;
+  margin: 0 0 18px; line-height: 1.05;
+}
+.canvas h2 {
+  font-size: 44px; font-weight: 400; margin: 40px 0 14px;
+}
+.canvas .subtitle { font-size: 40px; font-weight: 400; color: var(--ink-2); margin: 0 0 8px; }
+.canvas p, .canvas .note { font-size: 34px; color: var(--ink-2); margin: 22px 0 0; }
+.canvas .muted { color: var(--ink-3); }
+.canvas hr { border: 0; border-top: 1px solid var(--hairline); margin: 36px 0; }
+
+/* ---- tiles: the common "a few numbers" arrangement ---------------------- */
+.canvas .tiles {
+  display: grid; gap: 34px 30px; margin: 40px 0 0;
+  grid-template-columns: repeat(2, 1fr);
+}
+.canvas .tiles.cols-1 { grid-template-columns: 1fr; }
+.canvas .tiles.cols-3 { grid-template-columns: repeat(3, 1fr); }
+
+.canvas .tile .label {
+  display: block; font-size: 24px; letter-spacing: .17em; text-transform: uppercase;
+  color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.canvas .tile .value { display: block; font-size: 60px; font-weight: 500; margin-top: 12px; }
+.canvas .tile .unit  { display: block; font-size: 28px; font-weight: 500; color: var(--ink-2); margin-top: 8px; }
+
+/* State is carried by a word as well as a colour. `.tile.ok::after` supplies
+   the word so an agent cannot accidentally ship colour-only meaning. */
+.canvas .tile.ok   .value { color: var(--ok); }
+.canvas .tile.warn .value { color: var(--warn); }
+.canvas .tile.bad  .value { color: var(--bad); }
+.canvas .tile.ok::after,
+.canvas .tile.warn::after,
+.canvas .tile.bad::after {
+  display: inline-block; margin-top: 10px;
+  font-size: 24px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+}
+.canvas .tile.ok::after   { content: "OK";      color: var(--ok); }
+.canvas .tile.warn::after { content: "Watch";   color: var(--warn); }
+.canvas .tile.bad::after  { content: "Problem"; color: var(--bad); }
+
+/* ---- a log tail, the arrangement the typed schema could not express ------ */
+.canvas .log {
+  font-family: var(--mono); font-size: 26px; line-height: 1.45;
+  color: var(--ink-2); background: rgba(230,237,243,.04);
+  border-left: 4px solid var(--hairline);
+  padding: 20px 24px; margin: 32px 0 0;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 620px; overflow: hidden;
+}
+
+/* ---- tabular data ------------------------------------------------------- */
+.canvas table { border-collapse: collapse; width: 100%; margin: 32px 0 0; font-size: 30px; }
+.canvas th {
+  text-align: left; font-size: 24px; letter-spacing: .17em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600; padding: 0 20px 12px 0;
+}
+.canvas td { padding: 14px 20px 14px 0; border-top: 1px solid var(--hairline); }
+
+/* ---- images from the share --------------------------------------------- */
+.canvas img { display: block; max-width: 100%; height: auto; margin: 32px 0 0; }
+
+/* A full-bleed agent page owns the viewport; give it the panel's ground so it
+   does not sit on white while it loads. */
+html.canvas-full, html.canvas-full body { background: var(--surface); margin: 0; }

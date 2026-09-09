@@ -14,3 +14,8 @@ input/
 # ignored, not just image.jpg — naming one file meant a second asset dropped in
 # later would have been committed silently.
 shell/media/
+
+# Local agent tooling — commands, skills and machine-local settings. Personal
+# workflow, not panel code, and settings.local.json carries paths from other
+# projects. Kept out of a public repo.
+.claude/
