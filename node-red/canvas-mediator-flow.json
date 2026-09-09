@@ -1,0 +1,121 @@
+[
+  {
+    "id": "canvas_tab",
+    "type": "tab",
+    "label": "Agent canvas mediator",
+    "disabled": false,
+    "info": "Validates what the Hermes agent publishes and republishes it into the panel's\nnamespace. This is the only thing that crosses that boundary.\n\n  hermes/canvas/persistent  ->  wallpanel/canvas/persistent   (retained)\n  hermes/canvas/ephemeral   ->  wallpanel/canvas/ephemeral    (retained)\n\nON IMPORT:\n  1. Point ALL THREE mqtt nodes at one broker config authenticated as the\n     'mediator' user. Per hermes-deploy/docs/todo-broker.md that user reads\n     hermes/canvas and writes wallpanel/#, which is exactly this flow's job.\n\n     A dedicated 'mediator' user is optional - existing admin credentials work\n     and do not weaken anything, because what keeps the agent out of wallpanel/#\n     is the ACL on the AGENT's credential, not this flow's. See\n     kiosk-display/docs/agent-canvas-schema.md.\n\n     Do NOT give this flow the 'hermes' credential, though. That is the agent's\n     identity; a mediator holding it could publish as the agent, which defeats\n     the point of validating what the agent publishes.\n  2. Wire output 2 of the function node to the debug node if it is not already;\n     a rejection that goes nowhere is a canvas that silently never appears.\n\nAn invalid payload is DROPPED, not forwarded, so the previously published\ncanvas stays up. An empty payload is forwarded, because that is how the agent\nclears its own canvas.\n\nThe mqtt-out node has a blank topic and blank retain ON PURPOSE: it honours the\nmsg.topic and msg.retain the function node sets, so one output node serves both\ncanvases. If a Node-RED version defaults retain to 'false' instead of blank, the\npanel will render on a live publish and then show nothing after a reboot - check\nthat first.\n\nContract: kiosk-display/docs/agent-canvas-schema.md (canonical)."
+  },
+  {
+    "id": "in_persistent",
+    "type": "mqtt in",
+    "z": "canvas_tab",
+    "name": "hermes/canvas/persistent",
+    "topic": "hermes/canvas/persistent",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "mediator_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 190,
+    "y": 100,
+    "wires": [
+      [
+        "validate"
+      ]
+    ]
+  },
+  {
+    "id": "in_ephemeral",
+    "type": "mqtt in",
+    "z": "canvas_tab",
+    "name": "hermes/canvas/ephemeral",
+    "topic": "hermes/canvas/ephemeral",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "mediator_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 190,
+    "y": 180,
+    "wires": [
+      [
+        "validate"
+      ]
+    ]
+  },
+  {
+    "id": "validate",
+    "type": "function",
+    "z": "canvas_tab",
+    "name": "validate against the v1 schema",
+    "func": "// Canvas mediator: hermes/canvas/<kind>  ->  wallpanel/canvas/<kind>\n//\n// The agent never publishes into wallpanel/#. It publishes to its own prefix and\n// this node is the only thing that crosses into the panel's namespace, so the\n// panel's control topics stay unreachable from the agent even if its credential\n// leaks - and validation happens somewhere the agent cannot skip.\n//\n// Contract: kiosk-display/docs/agent-canvas-schema.md. That file is canonical;\n// if this disagrees with it, this is wrong.\n//\n// Output 1: accepted, ready to republish retained.\n// Output 2: rejected, with the reason - wire it to a debug node.\n\nconst MAX_BYTES = 64 * 1024;      // the document is small by design; bulk goes\n                                  // on the share as a file, not through here\nconst MAX_TILES = 6;\nconst MAX_POINTS = 200;\nconst ASSET_PREFIX = \"agent/\";\n\nconst kind = String(msg.topic || \"\").endsWith(\"/ephemeral\") ? \"ephemeral\" : \"persistent\";\nconst out = \"wallpanel/canvas/\" + kind;\n\nfunction reject(why) {\n    node.status({ fill: \"yellow\", shape: \"ring\", text: kind + \": \" + why });\n    return [null, { topic: msg.topic, payload: { rejected: why, kind: kind } }];\n}\n\nconst raw = (msg.payload === null || msg.payload === undefined)\n    ? \"\" : (typeof msg.payload === \"string\" ? msg.payload : JSON.stringify(msg.payload));\n\n// An empty payload is how the agent clears its own canvas. Forward it: clearing\n// is always valid, and it is the documented way to take a canvas down.\nif (raw.trim() === \"\") {\n    node.status({ fill: \"grey\", shape: \"dot\", text: kind + \": cleared\" });\n    return [{ topic: out, payload: \"\", retain: true }, null];\n}\n\nif (raw.length > MAX_BYTES) return reject(\"payload over \" + MAX_BYTES + \" bytes\");\n\nlet d;\ntry { d = JSON.parse(raw); } catch (e) { return reject(\"not JSON: \" + e.message); }\nif (!d || typeof d !== \"object\" || Array.isArray(d)) return reject(\"not an object\");\nif (d.v !== 1) return reject(\"unsupported schema version: \" + d.v);\nif (typeof d.title !== \"string\" || !d.title.trim()) return reject(\"missing title\");\nif (typeof d.updated_at !== \"string\" || isNaN(Date.parse(d.updated_at)))\n    return reject(\"missing or unparseable updated_at\");\nif (d.subtitle != null && typeof d.subtitle !== \"string\") return reject(\"subtitle not a string\");\nif (d.note != null && typeof d.note !== \"string\") return reject(\"note not a string\");\n\nif (d.tiles != null) {\n    if (!Array.isArray(d.tiles)) return reject(\"tiles is not an array\");\n    if (d.tiles.length > MAX_TILES) return reject(\"more than \" + MAX_TILES + \" tiles\");\n    for (let i = 0; i < d.tiles.length; i++) {\n        const t = d.tiles[i];\n        if (!t || typeof t !== \"object\") return reject(\"tile \" + i + \" is not an object\");\n        if (typeof t.label !== \"string\") return reject(\"tile \" + i + \" has no label\");\n        if (t.value === null || t.value === undefined) return reject(\"tile \" + i + \" has no value\");\n        if (t.state != null && [\"ok\", \"warn\", \"bad\"].indexOf(t.state) === -1)\n            return reject(\"tile \" + i + \" has unknown state \" + t.state);\n    }\n}\n\nif (d.series != null) {\n    if (!Array.isArray(d.series)) return reject(\"series is not an array\");\n    if (d.series.length > MAX_POINTS) return reject(\"series longer than \" + MAX_POINTS);\n    for (let k = 0; k < d.series.length; k++) {\n        const p = d.series[k];\n        if (!Array.isArray(p) || p.length !== 2 ||\n            typeof p[0] !== \"number\" || typeof p[1] !== \"number\" ||\n            !isFinite(p[0]) || !isFinite(p[1]))\n            return reject(\"series point \" + k + \" is not [number, number]\");\n    }\n}\n\n// An agent-supplied path aimed at a local filesystem is untrusted input: it has\n// to stay inside the mounted share. A bad path rejects the WHOLE payload rather\n// than dropping the image, because a canvas quietly missing the thing it was\n// published to show is worse than an absent canvas.\nif (d.image != null) {\n    const v = d.image;\n    const ok = typeof v === \"string\" && v.length > 0 && v.length <= 200 &&\n        v.indexOf(ASSET_PREFIX) === 0 &&\n        v.indexOf(\"..\") === -1 &&\n        v.indexOf(\":\") === -1 && v.indexOf(\"//\") === -1 &&\n        /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(v);\n    if (!ok) return reject(\"image path is not inside \" + ASSET_PREFIX);\n}\n\nif (d.ttl_s != null) {\n    if (typeof d.ttl_s !== \"number\" || !isFinite(d.ttl_s) || d.ttl_s <= 0 || d.ttl_s > 86400)\n        return reject(\"ttl_s must be a positive number of seconds, at most 86400\");\n    if (kind === \"persistent\")\n        node.warn(\"ttl_s on the persistent canvas is ignored - it has no TTL\");\n}\n\n// Rebuild from known fields only. Anything the agent adds beyond the schema is\n// dropped here rather than forwarded into the panel's namespace.\nconst clean = { v: 1, title: d.title, updated_at: d.updated_at };\nif (d.subtitle != null) clean.subtitle = d.subtitle;\nif (d.tiles != null) clean.tiles = d.tiles.map(function (t) {\n    const o = { label: t.label, value: t.value };\n    if (t.unit != null) o.unit = t.unit;\n    if (t.state != null) o.state = t.state;\n    return o;\n});\nif (d.series != null) clean.series = d.series;\nif (d.image != null) clean.image = d.image;\nif (d.note != null) clean.note = d.note;\nif (kind === \"ephemeral\" && d.ttl_s != null) clean.ttl_s = d.ttl_s;\n\nnode.status({ fill: \"green\", shape: \"dot\", text: kind + \": \" + d.title.slice(0, 24) });\nreturn [{ topic: out, payload: JSON.stringify(clean), retain: true }, null];\n",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 140,
+    "wires": [
+      [
+        "to_panel"
+      ],
+      [
+        "rejected"
+      ]
+    ]
+  },
+  {
+    "id": "to_panel",
+    "type": "mqtt out",
+    "z": "canvas_tab",
+    "name": "wallpanel/canvas/*",
+    "topic": "",
+    "qos": "1",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mediator_broker",
+    "x": 810,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "rejected",
+    "type": "debug",
+    "z": "canvas_tab",
+    "name": "rejected payloads",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 800,
+    "y": 190,
+    "wires": []
+  },
+  {
+    "id": "mediator_broker",
+    "type": "mqtt-broker",
+    "name": "Mosquitto as mediator",
+    "broker": "BROKER_HOST",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true
+  }
+]

@@ -6,7 +6,7 @@ than copying it; if the two ever disagree, this one is right.
 
 - Panel implementation: `shell/canvas.html`, gating in `shell/app.js`
 - Agent side and mediator: `hermes-deploy/docs/todo-canvas.md`
-- Broker ACLs that make this a boundary: `hermes-deploy/docs/todo-broker.md`
+- Broker ACLs — where the actual boundary lives: `hermes-deploy/docs/todo-broker.md`
 
 ---
 
@@ -38,9 +38,14 @@ and differ only in how long they live and whether they interrupt.
 |---|---|---|
 | Topic | `canvas/persistent` | `canvas/ephemeral` |
 | Lives until | replaced or cleared — **no TTL** | its TTL lapses |
-| In the arrow rotation | yes | **never** |
-| On arrival | waits its turn | **takes over the panel immediately** |
-| Dismissable | n/a | yes, any button press |
+| In the arrow rotation | yes, permanently | yes, while it lives |
+| On arrival | **takes over for ~5 min**, then settles into the rotation | **takes over for its whole TTL**, then leaves entirely |
+| Dismissable | yes, any button press | yes, any button press |
+
+Both interrupt when they arrive — publishing something nobody sees is not much
+of a display capability. The difference is what happens afterwards: a persistent
+canvas stops asking for attention but stays available in the rotation; an
+ephemeral one disappears completely.
 
 **They are independent and concurrent.** Neither clears, evicts or shadows the
 other: different topics, different gates, and the panel never publishes to
@@ -53,6 +58,24 @@ hidden.
 
 `ephemeralcanvas` is "look at this now". It seizes the wall, holds for its TTL,
 and vanishes with nothing needing to be published to end it.
+
+### The attention window
+
+A persistent canvas holds the screen for **`CANVAS_ATTENTION_S` (5 min by
+default)** measured from its `updated_at`, then reverts. Two consequences worth
+knowing:
+
+- **It is keyed to the payload, not to arrival.** A canvas published hours ago
+  does not seize the wall when the panel reboots and re-reads the retained
+  topic — the window has already passed. Verified.
+- **It is panel policy, not the agent's to choose.** The agent decides
+  persistent-vs-ephemeral; the panel decides how long "this changed" is worth
+  interrupting for. Otherwise an agent could hold the wall indefinitely by
+  publishing "persistent" with a long window. Change it in `views.js`.
+
+When both canvases want attention at once, **the ephemeral one wins** — "look at
+this now" outranks "this changed". That is an explicit priority on the takeover,
+not an accident of declaration order in `views.js`.
 
 ### Why the TTL runs from `updated_at`
 
@@ -78,6 +101,36 @@ The agent **never publishes into `wallpanel/#`**. Two reasons, both structural:
    unreachable from the agent even if its credential leaks. Otherwise a canvas
    capability quietly includes "change which view is on screen".
 2. Validation happens somewhere the agent cannot skip.
+
+### What actually enforces that — and what does not
+
+Be precise about this, because it is easy to credit the wrong component:
+
+**The boundary is the ACL on the `hermes` credential.** That is the only thing
+stopping the agent writing `wallpanel/command` directly. It holds whatever the
+mediator does.
+
+**The mediator is a validating hop, not a security boundary.** It is worth having
+for what it does to the payload — schema enforcement the agent cannot skip,
+unknown fields stripped, malformed documents dropped before they reach the panel.
+It is not what contains the agent.
+
+**Which credential the mediator runs as is therefore a minor question.** A
+dedicated `mediator` user buys log attribution and a smaller blast radius if
+Node-RED itself is compromised — but Node-RED runs next to the broker, so anyone
+who owns it can usually reach the broker anyway. Running the flow with existing
+admin credentials is a reasonable call; it does not weaken the boundary above,
+because that boundary lives on the agent's credential.
+
+The one thing it does cost: every other Node-RED flow, now and later, inherits
+the same broker reach, and broker logs cannot tell the mediator's writes apart
+from anything else on that host.
+
+**Still worth doing, independently:** narrow `wallpanel`'s *write* scope. That
+credential is browser-visible and should be assumed public, and today it can
+publish `wallpanel/canvas/*` directly — i.e. forge an agent canvas, bypassing the
+mediator entirely. Scoping its writes to `status`, `view/current`, `views` and
+`override` closes that, and is unrelated to which user Node-RED runs as.
 
 ### Dismissal, and why it exists
 
@@ -153,7 +206,9 @@ worse than an absent canvas.
   cannot be stale — it stops rendering instead, and its footer counts down
   rather than counting up.
 - **The two never interfere.** Publishing one does not touch the other's topic,
-  its place in the rotation, or the manual override. An ephemeral takeover that
+  its place in the rotation, or the manual override. When both are demanding
+  attention the ephemeral one is shown first; the persistent one is still there
+  in the rotation. An ephemeral takeover that
   lapses returns to exactly what was showing before it.
 - **Text is never markup.** Agent-supplied strings are written with
   `textContent`, never `innerHTML`.
@@ -161,6 +216,22 @@ worse than an absent canvas.
 To clear either canvas, publish an **empty retained** payload to its topic —
 the same idiom as clearing `wallpanel/override`. An ephemeral one does not need
 clearing; it expires.
+
+## What the mediator does with a bad payload
+
+**It drops it and forwards nothing.** The previously published canvas stays up.
+A transient bad publish should not wipe a standing board, and a canvas that
+vanishes is harder to diagnose than one that simply stopped updating — the
+rejection reason goes to a debug node instead.
+
+An **empty** payload is forwarded, because that is how the agent clears its own
+canvas.
+
+The mediator also **rebuilds the document from known fields only**. Anything the
+agent adds beyond the schema is dropped rather than forwarded into the panel's
+namespace, so the schema is a whitelist rather than a minimum.
+
+Implementation: `node-red/canvas-mediator-flow.json`.
 
 ## Validated twice, deliberately
 

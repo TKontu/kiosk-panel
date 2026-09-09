@@ -1,0 +1,147 @@
+[
+  {
+    "id": "t_persist",
+    "type": "inject",
+    "z": "canvas_tab",
+    "name": "TEST persistent",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "hermes/canvas/persistent",
+    "payload": "$string({\n  \"v\": 1,\n  \"title\": \"Mediator test\",\n  \"subtitle\": \"persistent canvas\",\n  \"tiles\": [\n    {\"label\": \"Path\", \"value\": \"agent to panel\", \"state\": \"ok\"},\n    {\"label\": \"Schema\", \"value\": \"v1\"}\n  ],\n  \"note\": \"If you can read this on the wall, the mediator validated and forwarded it.\",\n  \"updated_at\": $now()\n})",
+    "payloadType": "jsonata",
+    "x": 200,
+    "y": 300,
+    "wires": [
+      [
+        "validate"
+      ]
+    ]
+  },
+  {
+    "id": "t_ephem",
+    "type": "inject",
+    "z": "canvas_tab",
+    "name": "TEST ephemeral 2 min",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "hermes/canvas/ephemeral",
+    "payload": "$string({\n  \"v\": 1,\n  \"title\": \"Mediator test\",\n  \"subtitle\": \"ephemeral canvas, 2 minutes\",\n  \"tiles\": [{\"label\": \"Takes over\", \"value\": \"yes\", \"state\": \"ok\"}],\n  \"note\": \"This should seize the panel now and vanish by itself.\",\n  \"ttl_s\": 120,\n  \"updated_at\": $now()\n})",
+    "payloadType": "jsonata",
+    "x": 200,
+    "y": 360,
+    "wires": [
+      [
+        "validate"
+      ]
+    ]
+  },
+  {
+    "id": "t_bad",
+    "type": "inject",
+    "z": "canvas_tab",
+    "name": "TEST rejected (bad image path)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "hermes/canvas/persistent",
+    "payload": "$string({\n  \"v\": 1,\n  \"title\": \"Should never appear\",\n  \"image\": \"agent/../../../etc/passwd\",\n  \"updated_at\": $now()\n})",
+    "payloadType": "jsonata",
+    "x": 200,
+    "y": 420,
+    "wires": [
+      [
+        "validate"
+      ]
+    ]
+  },
+  {
+    "id": "t_clear_p",
+    "type": "inject",
+    "z": "canvas_tab",
+    "name": "CLEAR persistent",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "hermes/canvas/persistent",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 480,
+    "wires": [
+      [
+        "validate"
+      ]
+    ]
+  },
+  {
+    "id": "t_clear_e",
+    "type": "inject",
+    "z": "canvas_tab",
+    "name": "CLEAR ephemeral",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "hermes/canvas/ephemeral",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 540,
+    "wires": [
+      [
+        "validate"
+      ]
+    ]
+  }
+]

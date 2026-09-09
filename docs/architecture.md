@@ -94,8 +94,11 @@ The broker requires authentication (`allow_anonymous false` on the Pi). A
 dedicated **`wallpanel`** MQTT user was created (`mosquitto_passwd`). The shell
 page connects with it (credentials in `config.js`, which is gitignored along
 with the LAN hosts and coordinates). Because the credential is
-visible in page source, scope it with a broker ACL to `wallpanel/#` if it ever
-matters (not done yet). Node-RED uses its own existing broker credentials.
+visible in page source, it is scoped by a broker ACL to `wallpanel/#`
+(**live as of 2026-09-08**, verified: publishes outside that prefix are silently
+dropped and nothing outside it is delivered). Mosquitto denies without erroring,
+so a client cannot tell the difference between "published" and "discarded" —
+worth knowing when something mysteriously does not arrive. Node-RED uses its own existing broker credentials.
 
 ## The shell (split into files)
 

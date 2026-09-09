@@ -47,13 +47,16 @@ wall-panel/
 │   ├── views.js                #   VIEWS map — THE view list; add views here
 │   ├── photo.html              #   full-bleed still image view (media/image.jpg)
 │   ├── overview.html           #   the dial: spot price + weather on one clock
+│   ├── canvas.html             #   agent canvas; ?src= picks persistent/ephemeral
 │   ├── media/                  #   images used by views (image.jpg — not tracked)
 │   ├── schedule.js             #   time-of-day schedule
 │   ├── app.js                  #   MQTT + schedule + override logic
 │   ├── style.css               #   overlay/base styling
 │   └── mqtt.min.js             #   bundled MQTT.js (on the kiosk already; not tracked)
 └── node-red/
-    └── wallpanel-nodered-flow.json   # Zigbee remote → panel view commands
+    ├── wallpanel-nodered-flow.json   # Zigbee remote → panel view commands
+    ├── canvas-mediator-flow.json     # hermes/canvas/* → wallpanel/canvas/*
+    └── canvas-mediator-test-inject.json  # optional: click-to-test injects
 ```
 
 ## How it works (one paragraph)

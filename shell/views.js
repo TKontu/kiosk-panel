@@ -23,6 +23,13 @@
 // actually edit to add a view — carries no site-specific hosts.
 var HOSTS = (window.CONFIG && window.CONFIG.hosts) || {};
 
+// How long a freshly published PERSISTENT canvas holds the screen before
+// settling into the rotation. Panel policy, not the agent's to choose: the
+// agent decides persistent-vs-ephemeral, the panel decides how long "new"
+// is worth interrupting for. Measured from the payload's updated_at, so a
+// canvas published hours ago does not seize the wall when the panel reboots.
+var CANVAS_ATTENTION_S = 300;      // 5 minutes
+
 window.VIEWS = {
   tapo: {
     url: HOSTS.frigate && HOSTS.frigate + "/#tapo310",
@@ -55,6 +62,19 @@ window.VIEWS = {
   canvas: {
     url: "canvas.html?src=canvas/persistent",
     rotate: 0,
+    // Takes over for CANVAS_ATTENTION_S after it changes, then stops asking and
+    // stays in the rotation. activeWhen (rotation membership) has no time limit;
+    // only the attention does.
+    takeover: {
+      priority: 1,
+      test: function (payload) {
+        try {
+          var d = JSON.parse(payload);
+          var at = Date.parse(d.updated_at);
+          return isFinite(at) && Date.now() < at + CANVAS_ATTENTION_S * 1000;
+        } catch (e) { return false; }
+      },
+    },
     activeWhen: {
       topic: "canvas/persistent",
       test: function (payload) {
@@ -66,18 +86,22 @@ window.VIEWS = {
     },
   },
 
-  // Ephemeral: "look at this now". Takes over the panel the moment it arrives,
-  // holds for its TTL, then vanishes and the panel returns to whatever it was
-  // doing. Deliberately NOT in the arrow rotation - it interrupts, it is not
-  // something you browse to - and any button press dismisses it.
+  // Ephemeral: "look at this now". Takes over the panel the moment it arrives
+  // and holds for its TTL, then vanishes.
   //
-  // The gate carries the expiry, so nothing has to publish to end it and a
-  // payload that expired while the panel was off never shows at all.
+  // It is a normal member of the arrow rotation while it lives, so the controls
+  // work on it exactly as on any other view: arrow away from it, arrow back to
+  // it, or set it by name. A button press cancels the TAKEOVER - it stops
+  // forcing itself on screen - but does not banish the view; that is what makes
+  // it browsable rather than a modal you get one look at.
+  //
+  // The gate carries the expiry, so nothing has to publish to end it, it drops
+  // out of the rotation by itself when the TTL lapses, and a payload that
+  // expired while the panel was off never shows at all.
   canvasNow: {
     url: "canvas.html?src=canvas/ephemeral",
     rotate: 0,
-    cycle: false,
-    takeover: true,
+    takeover: { priority: 2 },   // "look at this now" outranks "this changed"
     activeWhen: {
       topic: "canvas/ephemeral",
       test: function (payload) {

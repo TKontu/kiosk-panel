@@ -84,25 +84,51 @@
   // wall for the length of its TTL with no way out, so any button press while a
   // takeover is showing dismisses *that payload* - not the topic, not the view.
   // The next payload takes over again as normal.
+  //
+  // Note what dismissal does NOT do: it does not remove the view from the arrow
+  // rotation. A takeover view is a normal view that additionally forces itself
+  // on screen once; dismissing it cancels only the forcing, so the controls
+  // still scroll to and from it for as long as it is alive.
   const dismissed = {};                // gate topic -> the payload dismissed
 
+  // `takeover` is either true (hold the screen for as long as the gate is open)
+  // or { test, priority } - test decides whether it is currently demanding
+  // attention, which lets a view stay in the rotation for good while only
+  // holding the screen for a while. The persistent canvas uses that: it takes
+  // over for a few minutes when it changes, then settles into the rotation.
+  //
+  // Priority breaks ties. Highest wins, so "look at this now" beats "something
+  // was updated" without depending on declaration order in views.js.
+  function takeoverSpec(name) {
+    const t = window.VIEWS[name] && window.VIEWS[name].takeover;
+    if (!t) return null;
+    return t === true ? { priority: 0 } : { test: t.test, priority: t.priority || 0 };
+  }
+
   function takeoverView() {
-    const names = Object.keys(window.VIEWS);
-    for (let i = 0; i < names.length; i++) {
-      const n = names[i];
-      if (!window.VIEWS[n].takeover || !isActive(n)) continue;
+    let best = null, bestPri = -Infinity;
+    Object.keys(window.VIEWS).forEach((n) => {
+      const spec = takeoverSpec(n);
+      if (!spec || !isActive(n)) return;
       const g = gateOf(n);
-      if (g && dismissed[g.topic] === gates[g.topic]) continue;   // this one, already waved off
-      return n;
-    }
-    return null;
+      if (g && dismissed[g.topic] === gates[g.topic]) return;   // already waved off
+      if (typeof spec.test === "function") {
+        // A throwing test means "not demanding attention", never an exception
+        // out of tick().
+        let wants = false;
+        try { wants = !!spec.test(g ? gates[g.topic] : null); } catch (e) { wants = false; }
+        if (!wants) return;
+      }
+      if (spec.priority > bestPri) { best = n; bestPri = spec.priority; }
+    });
+    return best;
   }
 
   // Called from the control handlers: whatever is on screen right now, if it is
   // a takeover, stops outranking. Records the payload rather than the topic so
   // a later payload is not pre-dismissed.
   function dismissTakeover() {
-    if (!shownView || !window.VIEWS[shownView] || !window.VIEWS[shownView].takeover) return;
+    if (!shownView || !takeoverSpec(shownView)) return;
     const g = gateOf(shownView);
     if (g) dismissed[g.topic] = gates[g.topic];
   }
@@ -224,8 +250,21 @@
     setTimeout(reveal, LOAD_CAP);          // never get stuck on a black panel
   }
 
+  // The advertised rotation has to be republished when it changes, and a gate
+  // can close because time passed rather than because a message arrived - an
+  // ephemeral canvas reaching its TTL is exactly that. Publishing only on
+  // message left `views` claiming a view that had already expired.
+  let lastViews = null;
+  function publishViews() {
+    const now = JSON.stringify(cycle());
+    if (now === lastViews) return;
+    lastViews = now;
+    publish(TOPICS.views, now, true);
+  }
+
   // ---- Decide + apply what should be on screen --------------------------
   function tick() {
+    publishViews();
     const period = currentPeriod();
     if (override && override.periodId !== period.id) override = null; // expired
     // Precedence: takeover, then a manual override, then the schedule. Checked
@@ -276,8 +315,9 @@
     client.on("connect", () => {
       publish(TOPICS.status, "online", true);
       // Advertise the cycle so anything else (Node-RED debug, a dashboard)
-      // can see the view list without being told about it.
-      publish(TOPICS.views, JSON.stringify(cycle()), true);
+      // can see the view list without being told about it. tick() keeps it
+      // current from here on.
+      publishViews();
       client.subscribe([TOPICS.set, TOPICS.override, TOPICS.command].concat(gateTopics()));
       tick();
     });
@@ -290,8 +330,7 @@
       const msg = payload.toString();
 
       if (gateTopics().indexOf(topic) !== -1) {   // a view's gate opened or shut
-        gates[topic] = msg;
-        publish(TOPICS.views, JSON.stringify(cycle()), true);   // rotation changed
+        gates[topic] = msg;                      // tick() republishes the rotation
         // If what is on screen just went inactive, hand back to the schedule
         // rather than leaving a stale page up.
         if (shownView && !isActive(shownView)) {
