@@ -1,0 +1,234 @@
+[
+  {
+    "id": "tt_co2",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "TEST co2 (hero, bad)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/co2",
+    "payload": "$string({\n  \"label\": \"CO₂ living room\", \"value\": \"1240\", \"unit\": \"ppm\",\n  \"state\": \"bad\", \"hero\": true, \"order\": 10,\n  \"updated_at\": $now()\n})",
+    "payloadType": "jsonata",
+    "x": 200,
+    "y": 240,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tt_temp",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "TEST inside temp",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/temp-in",
+    "payload": "$string({\n  \"label\": \"Inside\", \"value\": \"21.4\", \"unit\": \"°C\", \"order\": 20,\n  \"updated_at\": $now()\n})",
+    "payloadType": "jsonata",
+    "x": 200,
+    "y": 300,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tt_rh",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "TEST humidity (watch)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/rh-in",
+    "payload": "$string({\n  \"label\": \"Humidity\", \"value\": \"56\", \"unit\": \"%\", \"state\": \"warn\", \"order\": 30,\n  \"updated_at\": $now()\n})",
+    "payloadType": "jsonata",
+    "x": 200,
+    "y": 360,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tt_stale",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "TEST stale tile (3 h old)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/stale-test",
+    "payload": "$string({\n  \"label\": \"Old reading\", \"value\": \"19.0\", \"unit\": \"°C\", \"order\": 90,\n  \"updated_at\": $fromMillis($millis() - 3*3600*1000)\n})",
+    "payloadType": "jsonata",
+    "x": 200,
+    "y": 420,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tc_co2",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "CLEAR co2",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/co2",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 480,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tc_temp_in",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "CLEAR temp-in",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/temp-in",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 540,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tc_rh_in",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "CLEAR rh-in",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/rh-in",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 600,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tc_stale_test",
+    "type": "inject",
+    "z": "sensors_tab",
+    "name": "CLEAR stale-test",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "wallpanel/tiles/sensors/stale-test",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 660,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  }
+]

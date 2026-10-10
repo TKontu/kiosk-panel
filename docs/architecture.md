@@ -66,6 +66,7 @@ the same topics.
 | `wallpanel/status`        | shell → broker    | **yes**  | `online` / `offline` (LWT)                |
 | `wallpanel/view/current`  | shell → broker    | **yes**  | name of the view actually on screen       |
 | `wallpanel/views`         | shell → broker    | **yes**  | JSON array: the arrow rotation, in order  |
+| `wallpanel/tiles/<board>/<key>` | Node-RED → `tiles.html` | **yes** | JSON tile `{label, value, unit?, state?, hero?, order?, updated_at?}`, `""` to remove ([contract](todo-view-mechanisms.md#a-generic-tiles-renderer--done)) |
 
 **Intents vs. names.** `wallpanel/command` is the important one: it lets a
 controller say *what the user wants* (`next`) without knowing *what views exist*.
@@ -115,6 +116,7 @@ maintainability** into:
 | `style.css`   | Stage geometry/crossfade + overlay styling.                    | rare           |
 | `photo.html`  | Full-bleed still-image view; shows `media/image.jpg`.          | rare           |
 |`overview.html`| The dial: price + weather on one clock. Places from `config.js`.| rare         |
+| `tiles.html`  | Generic tiles board: renders `wallpanel/tiles/<board>/+`. `?board=&title=&stale=`. | rare |
 | `media/`      | Images used by views. Not tracked — supply your own.           | occasionally   |
 | `mqtt.min.js` | Bundled MQTT.js (~330 KB), local (no CDN).                     | never          |
 

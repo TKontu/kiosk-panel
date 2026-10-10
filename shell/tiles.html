@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The kiosk runs Chromium with --force-dark-mode; declaring the page's own
+     scheme stops it re-processing colours we already chose for dark. -->
+<meta name="color-scheme" content="dark">
+<title>Tiles</title>
+<link rel="stylesheet" href="panel.css">
+<style>
+  /* Tile, label, value, unit and the OK / Watch / Problem state words all come
+     from the `.canvas` classes in panel.css, so this board and an agent's page
+     read as the same panel. Only what panel.css has no answer for is here. */
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  body.canvas { padding: 80px 48px 64px; display: flex; flex-direction: column; }
+
+  .canvas .tiles:empty { display: none; }
+
+  /* The hero gets the full width and a value you can read from across the
+     room: on a sensors board that is CO2, the one reading that makes someone
+     get up and open a window. */
+  .hero { margin: 48px 0 0; padding-bottom: 44px; border-bottom: 1px solid var(--hairline); }
+  .canvas .hero .value { font-size: 150px; font-weight: 400; line-height: 1; margin-top: 18px; }
+  .canvas .hero .unit  { font-size: 40px; }
+  .canvas .hero::after { font-size: 30px; margin-top: 16px; }
+
+  /* Stale: kept on screen, not hidden - a last-known reading with its age is
+     more use than a gap - but its state no longer applies, so the word changes
+     too. Colour is never the only carrier. */
+  .canvas .tile.stale .value { color: var(--ink-3); }
+  .canvas .tile.stale::after {
+    display: inline-block; margin-top: 10px;
+    font-size: 24px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    content: "Stale \00b7  " attr(data-since); color: var(--stale);
+  }
+
+  .empty { margin-top: 48px; font-size: 40px; color: var(--ink-3); }
+
+  .footer {
+    margin-top: auto; padding-top: 36px; border-top: 1px solid var(--hairline);
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 28px; color: var(--ink-3);
+  }
+</style>
+</head>
+<body class="canvas">
+  <h1 id="title"></h1>
+  <div class="hero tile" id="hero" hidden><span class="label"></span><span class="value"></span><span class="unit"></span></div>
+  <div class="tiles" id="tiles"></div>
+  <div class="empty" id="empty">No readings yet</div>
+  <div class="footer"><div id="more"></div><div id="age"></div></div>
+
+<!-- This page is loaded in an iframe, so it loads config.js itself; it does
+     not inherit window.CONFIG from index.html. -->
+<script src="mqtt.min.js"></script>
+<script src="config.js"></script>
+<script>
+"use strict";
+/* A generic tiles board: one page that renders whatever retained topics sit
+   under a prefix, so a new reading on the wall is a new topic, not a new page.
+
+     wallpanel/tiles/<board>/<key>   retained, one tile each, empty = remove
+     {
+       "label": "CO2 living room",     required, string
+       "value": 1240,                  required, string or number, shown as-is
+       "unit":  "ppm",                 optional
+       "state": "ok" | "warn" | "bad", optional, decided by the publisher
+       "hero":  true,                  optional, first one gets the big row
+       "order": 10,                    optional, ascending; then by key
+       "updated_at": "2026-10-10T13:40:00Z"   optional, ISO 8601, for staleness
+     }
+
+   The publisher (Node-RED) owns formatting and judgement - rounding, units,
+   thresholds - so the same tile can drive a phone notification later and this
+   page stays free of any one source's schema. See docs/todo-view-mechanisms.md.
+
+     tiles.html?board=sensors&title=Indoors&stale=60
+
+   An invalid tile is dropped on its own: one bad publisher must not blank a
+   board that is otherwise right. */
+
+var C = window.CONFIG || {};
+var BASE = ((C.topics && C.topics.override) || "wallpanel/override")
+             .replace(/\/override$/, "");
+
+var Q = new URLSearchParams(location.search);
+// One topic level, so no "/" - the board is what `+` hangs under.
+var BOARD = (Q.get("board") || "sensors").replace(/[^A-Za-z0-9_-]/g, "") || "sensors";
+var PREFIX = BASE + "/tiles/" + BOARD + "/";
+var STALE_MIN = Number(Q.get("stale")) > 0 ? Number(Q.get("stale")) : 60;
+var MAX_TILES = 6;            // few and large; the panel is 68.8 ppi read from 2-3 m
+
+var tiles = {};               // key -> validated tile
+
+function el(id) { return document.getElementById(id); }
+
+function validTile(t) {
+  if (!t || typeof t !== "object" || Array.isArray(t)) return false;
+  if (typeof t.label !== "string" || !t.label.trim()) return false;
+  if (typeof t.value !== "string" && !(typeof t.value === "number" && isFinite(t.value))) return false;
+  if (t.unit != null && typeof t.unit !== "string") return false;
+  if (t.state != null && ["ok", "warn", "bad"].indexOf(t.state) === -1) return false;
+  if (t.order != null && !(typeof t.order === "number" && isFinite(t.order))) return false;
+  if (t.updated_at != null && isNaN(Date.parse(t.updated_at))) return false;
+  return true;
+}
+
+function hhmm(ms) {
+  return new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Fill a .tile element. Text only, never markup: tile strings come off the bus.
+function fill(node, t) {
+  node.className = node.className.replace(/\b(ok|warn|bad|stale)\b/g, "").trim();
+  node.querySelector(".label").textContent = t.label;
+  node.querySelector(".value").textContent = String(t.value);
+  var u = node.querySelector(".unit");
+  u.textContent = t.unit || "";
+  u.style.display = t.unit ? "" : "none";   // panel.css sets display, which beats [hidden]
+  var at = t.updated_at ? Date.parse(t.updated_at) : NaN;
+  if (isFinite(at) && Date.now() - at > STALE_MIN * 60000) {
+    node.classList.add("stale");
+    node.setAttribute("data-since", hhmm(at));
+  } else if (t.state) {
+    node.classList.add(t.state);
+  }
+}
+
+function newTile() {
+  var d = document.createElement("div");
+  d.className = "tile";
+  ["label", "value", "unit"].forEach(function (c) {
+    var s = document.createElement("span");
+    s.className = c;
+    d.appendChild(s);
+  });
+  return d;
+}
+
+function render() {
+  var keys = Object.keys(tiles).sort(function (a, b) {
+    var oa = tiles[a].order != null ? tiles[a].order : Infinity;
+    var ob = tiles[b].order != null ? tiles[b].order : Infinity;
+    return oa !== ob ? (oa < ob ? -1 : 1) : (a < b ? -1 : a > b ? 1 : 0);
+  });
+  var shown = keys.slice(0, MAX_TILES);
+  var heroKey = null;
+  for (var i = 0; i < shown.length; i++) {
+    if (tiles[shown[i]].hero === true) { heroKey = shown[i]; break; }
+  }
+
+  var hero = el("hero");
+  hero.hidden = !heroKey;
+  if (heroKey) fill(hero, tiles[heroKey]);
+
+  var grid = el("tiles");
+  grid.textContent = "";
+  shown.forEach(function (k) {
+    if (k === heroKey) return;
+    var node = newTile();
+    fill(node, tiles[k]);
+    grid.appendChild(node);
+  });
+
+  el("empty").hidden = keys.length > 0;
+  var extra = keys.length - shown.length;
+  el("more").textContent = extra > 0 ? "+" + extra + " more" : "";
+
+  var newest = keys.reduce(function (m, k) {
+    var at = tiles[k].updated_at ? Date.parse(tiles[k].updated_at) : NaN;
+    return isFinite(at) && at > m ? at : m;
+  }, 0);
+  el("age").textContent = newest ? "updated " + hhmm(newest) : "";
+}
+
+el("title").textContent = Q.get("title") || BOARD.charAt(0).toUpperCase() + BOARD.slice(1);
+render();
+
+/* Read-only, like canvas.html: subscribes and never publishes. A second
+   client is cheaper than plumbing payloads across the iframe boundary. While
+   the connection is down the last values stay up, and staleness says how old
+   they are; the shell shows the connection badge. */
+(function boot() {
+  if (!C.broker || typeof mqtt === "undefined") return;
+  var client = mqtt.connect(C.broker, {
+    clientId: "wallpanel-tiles-" + Math.random().toString(16).slice(2, 8),
+    username: C.username,
+    password: C.password,
+    reconnectPeriod: 5000
+  });
+  client.on("connect", function () { client.subscribe(PREFIX + "+"); });
+  client.on("message", function (topic, payload) {
+    if (topic.indexOf(PREFIX) !== 0) return;
+    var key = topic.slice(PREFIX.length);
+    var raw = payload.toString();
+    var t = null;
+    if (raw) { try { t = JSON.parse(raw); } catch (e) { t = null; } }
+    if (raw && validTile(t)) tiles[key] = t;
+    else delete tiles[key];               // cleared, or invalid: drop this tile only
+    render();
+  });
+  // Staleness is a function of the clock, not of traffic, so re-check it
+  // when nothing arrives - which is exactly when a sensor has gone quiet.
+  setInterval(render, 20000);
+})();
+</script>
+</body>
+</html>

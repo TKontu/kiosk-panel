@@ -1,0 +1,80 @@
+[
+  {
+    "id": "sensors_tab",
+    "type": "tab",
+    "label": "Wall Panel Sensors",
+    "disabled": false,
+    "info": "Republishes chosen zigbee2mqtt sensor readings as wall-panel TILES.\n\n  zigbee2mqtt/<device>  ->  wallpanel/tiles/sensors/<key>  (retained)\n\nOn import:\n  1. Edit the SENSORS map at the top of the function node: your zigbee2mqtt\n     friendly names, and only the readings worth a tile.\n  2. Point both MQTT nodes at your existing authenticated broker config.\n     That user must be allowed to publish wallpanel/tiles/#.\n\nThe panel shows them with tiles.html?board=sensors (the \"sensors\" view in\nviews.js). To remove a tile, publish an empty retained payload to its topic.\nContract: kiosk-display/docs/todo-view-mechanisms.md."
+  },
+  {
+    "id": "z2m_in",
+    "type": "mqtt in",
+    "z": "sensors_tab",
+    "name": "zigbee2mqtt devices",
+    "topic": "zigbee2mqtt/+",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "wallpanel_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 120,
+    "wires": [
+      [
+        "tiles_fn"
+      ]
+    ]
+  },
+  {
+    "id": "tiles_fn",
+    "type": "function",
+    "z": "sensors_tab",
+    "name": "sensor -> tiles",
+    "func": "// zigbee2mqtt sensor -> wall-panel tiles: wallpanel/tiles/sensors/<key>\n//\n// Contract: kiosk-display/docs/todo-view-mechanisms.md (generic tiles renderer).\n// The panel only renders; formatting and judgement live here, so the same\n// tile could drive a phone notification later.\n//\n// EDIT ON IMPORT: replace the friendly names with your own zigbee2mqtt devices\n// and drop the readings you don't have. Pick the few that would make someone\n// get up - a dozen numbers on the wall read as wallpaper (docs/todo-sensors.md).\nconst SENSORS = {\n    \"LIVINGROOM_AIR\": [\n        { key: \"co2\",     field: \"co2\",         label: \"CO₂ living room\", unit: \"ppm\", decimals: 0, rule: \"co2\",      hero: true, order: 10 },\n        { key: \"pm25\",    field: \"pm25\",        label: \"PM2.5\",               unit: \"µg/m³\", decimals: 0, rule: \"pm25\", order: 40 },\n    ],\n    \"LIVINGROOM_TEMP\": [\n        { key: \"temp-in\", field: \"temperature\", label: \"Inside\",   unit: \"°C\", decimals: 1, order: 20 },\n        { key: \"rh-in\",   field: \"humidity\",    label: \"Humidity\", unit: \"%\",       decimals: 0, rule: \"humidity\", order: 30 },\n    ],\n};\n\n// Thresholds from docs/todo-sensors.md. Starting points, worth arguing with.\nconst RULES = {\n    co2:      v => v > 1200 ? \"bad\" : v >= 800 ? \"warn\" : \"ok\",\n    humidity: v => (v > 60 || v < 25) ? \"bad\" : (v > 50 || v < 30) ? \"warn\" : \"ok\",\n    pm25:     v => v > 25 ? \"bad\" : v >= 10 ? \"warn\" : \"ok\",\n};\n\nconst device = String(msg.topic || \"\").replace(/^zigbee2mqtt\\//, \"\");\nconst readings = SENSORS[device];\nif (!readings || !msg.payload || typeof msg.payload !== \"object\") return null;\n\nconst now = new Date().toISOString();\nconst out = [];\nfor (const r of readings) {\n    const raw = msg.payload[r.field];\n    if (typeof raw !== \"number\" || !isFinite(raw)) continue;   // not in this report\n    const tile = {\n        label: r.label,\n        value: raw.toFixed(r.decimals),\n        unit: r.unit,\n        order: r.order,\n        updated_at: now,\n    };\n    if (r.rule && RULES[r.rule]) tile.state = RULES[r.rule](raw);\n    if (r.hero) tile.hero = true;\n    out.push({ topic: \"wallpanel/tiles/sensors/\" + r.key, payload: JSON.stringify(tile) });\n}\nif (!out.length) return null;                 // e.g. a battery-only report\nnode.status({ fill: \"green\", shape: \"dot\", text: device + \" → \" + out.length + \" tile(s)\" });\nreturn [out];\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 120,
+    "wires": [
+      [
+        "tiles_out"
+      ]
+    ]
+  },
+  {
+    "id": "tiles_out",
+    "type": "mqtt out",
+    "z": "sensors_tab",
+    "name": "publish tiles (retained)",
+    "topic": "",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "wallpanel_broker",
+    "x": 660,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "wallpanel_broker",
+    "type": "mqtt-broker",
+    "name": "Mosquitto (Pi)",
+    "broker": "BROKER_HOST",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true
+  }
+]
