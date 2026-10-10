@@ -123,10 +123,21 @@ restrictions from `file://` in Chromium and would need a local server or a
 flag; globals just work off disk. Load order (set in `index.html`):
 `mqtt.min.js → config.js → views.js → schedule.js → app.js`.
 
-### What the overlay says when the connection fails
+### What the panel shows when the connection fails
 
-The overlay names the cause, and the distinction it draws is **did the broker
-answer**. That matters because the two halves have unrelated fixes:
+**Once a view is on screen, a lost connection never replaces it.** The view
+stays exactly as it was (no reload) and a small corner badge says
+"Connection lost since HH:MM · retrying" (or the CONNACK headline below). It
+clears itself on reconnect. While disconnected, `tick()` also holds the current
+view rather than following the schedule: a view loaded now would most likely be
+Chromium's own error page. The reconnect runs `tick()` and catches up. The
+kiosk's WiFi drops for a few seconds many times a day, and the old full-screen
+overlay turned each of those into an error screen that stayed up until the next
+view change.
+
+The full-screen overlay is only used when there is nothing on screen yet. It
+names the cause, and the distinction it draws is **did the broker answer**.
+That matters because the two halves have unrelated fixes:
 
 | Overlay | Meaning | Where the fix is |
 |---|---|---|
@@ -537,6 +548,11 @@ know they exist:
 - Timezone: `Europe/Helsinki` (`timedatectl`); NTP active (DST auto).
 - Netplan: `eno1` marked `optional: true` (unplugged ethernet was hanging boot
   ~1m37s on `systemd-networkd-wait-online`).
+- Netplan: `band: 2.4GHz` on the `Kupariverkko` access point (2026-10-10). The
+  router kept steering the kiosk to its 5 GHz radio, which is too weak at the
+  panel: every move lost beacons, failed the handshake and fell back to 2.4 GHz,
+  costing seconds to minutes offline each time. Netplan turns `band` into a
+  2.4 GHz-only `freq_list` in `/run/netplan/wpa-wlp0s20f3.conf`.
 
 ## Alternative considered: remote-debugging + CDP
 

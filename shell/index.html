@@ -18,6 +18,10 @@
     <div id="detail">Reaching the broker to load your views.</div>
   </div>
 
+  <!-- Connection lost while a view is up: a corner note over the view, which
+       stays exactly as it was. See showFault() in app.js. -->
+  <div id="netbadge" role="status"><span class="dot"></span><span id="netbadge-text"></span></div>
+
   <!-- Load order matters: config + data first, then the app logic.
        Plain globals (no ES modules) so it works from file:// with no server. -->
   <script src="mqtt.min.js"></script>

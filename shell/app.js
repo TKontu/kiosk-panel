@@ -13,10 +13,13 @@
   const overlay  = document.getElementById("overlay");
   const headline = document.getElementById("headline");
   const detail   = document.getElementById("detail");
+  const netbadge = document.getElementById("netbadge");
+  const netText  = document.getElementById("netbadge-text");
 
   let override  = null;   // { view, periodId } or null
   let shownView = null;   // what's currently rendered
   let client    = null;
+  let online    = false;  // connected to the broker right now?
 
   // ---- Topics -----------------------------------------------------------
   // config.js only has to name the three original topics. The rest are derived
@@ -272,6 +275,10 @@
     // without anything needing to publish.
     let want = takeoverView() || (override ? override.view : period.view);
     if (!isActive(want)) want = window.OFF_VIEW;   // gated shut: fall through
+    // While the connection is down, hold what is on screen. A new view loaded
+    // now would most likely land on Chromium's own "no internet" page; the one
+    // already up is still painted. The reconnect calls tick() and catches up.
+    if (!online && shownView) return;
     if (want !== shownView) render(want);
   }
 
@@ -295,6 +302,18 @@
   function hideOverlay() {
     overlay.classList.remove("show");
     stack.classList.remove("hidden");
+  }
+
+  let offlineSince = null;   // when the badge first went up for this outage
+  function showBadge(head) {
+    if (!offlineSince) offlineSince = new Date();
+    const hhmm = offlineSince.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    netText.textContent = head + " since " + hhmm + " · retrying";
+    netbadge.classList.add("show");
+  }
+  function hideBadge() {
+    offlineSince = null;
+    netbadge.classList.remove("show");
   }
 
   // ---- Why the connection failed ----------------------------------------
@@ -355,6 +374,17 @@
   }
 
   function showFault() {
+    online = false;
+
+    // A view is already up: keep it on screen untouched and say so in a corner.
+    // Most drops are seconds of WiFi, and the full-screen overlay used to
+    // replace a perfectly good view with an error page for every one of them.
+    if (shownView) {
+      showBadge(fault ? fault.head
+        : everConnected ? "Connection lost" : "Can't reach the broker");
+      return;
+    }
+
     const retry = " Retrying every 3 s"
       + (attempts > 1 ? " &mdash; " + attempts + " attempts so far." : ".");
 
@@ -393,6 +423,8 @@
     });
 
     client.on("connect", () => {
+      online = true;
+      hideBadge();
       everConnected = true;
       fault = null;
       lastMessage = null;
@@ -411,6 +443,7 @@
        carries the cause across. */
     client.on("error", (e) => { noteFault(e); showFault(); });
     client.on("offline", showFault);
+    client.on("close", () => { online = false; });
     client.on("reconnect", () => { attempts++; });
 
     client.on("message", (topic, payload) => {
