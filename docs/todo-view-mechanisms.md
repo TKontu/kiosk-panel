@@ -3,10 +3,9 @@
 Cross-cutting plumbing that several planned views need. Worth building once,
 before the views that depend on it.
 
-**Status:** conditional views and the takeover are **built and deployed** — see
-below. The generic tiles renderer is still open. Unblocks
-`todo-printer.md`, `todo-server-status.md`, and anything else that is only
-sometimes relevant.
+**Status:** conditional views, the takeover and the generic tiles renderer are
+all **built**. These unblock `todo-printer.md`, `todo-sensors.md`,
+`todo-server-status.md`, and anything else that is only sometimes relevant.
 
 ---
 
@@ -100,14 +99,47 @@ immediately and ignores the schedule; anything lower the panel ignores.
 Deliberately no auto-dismiss: an alert that clears itself is an alert you never
 saw. Clear it by publishing empty, the same way `on` clears an override.
 
-## A generic tiles renderer
+## A generic tiles renderer — DONE
 
-Rather than a bespoke page per data source, one page that renders whatever
-retained topics match a pattern, as a grid of labelled values with units and
-optional thresholds. That single view covers `todo-sensors.md` and
-`todo-server-status.md` between them, and most future "some numbers on a wall"
-requests.
+Rather than a bespoke page per data source, `shell/tiles.html` renders whatever
+retained topics sit under one prefix, as a few large labelled values. That one
+page covers `todo-sensors.md` and `todo-server-status.md` between them, and most
+future "some numbers on a wall" requests. A board is a `views.js` entry:
 
-Keep the existing type scale and ink tokens - the panel is 68.8 ppi and read
-from 2-3 m (see `architecture.md`). Tiles should be few and large, never a dense
-table.
+```js
+sensors: { url: "tiles.html?board=sensors&title=Indoors", rotate: 0 }
+```
+
+**One retained topic per tile**, `wallpanel/tiles/<board>/<key>`, so adding a
+reading is publishing a topic, with no panel change:
+
+```json
+{ "label": "CO₂ living room",          // required, string
+  "value": "1240",                      // required, string or number, shown as-is
+  "unit": "ppm",                        // optional
+  "state": "ok" | "warn" | "bad",       // optional
+  "hero": true,                         // optional: the big full-width row
+  "order": 10,                          // optional: ascending, then by key
+  "updated_at": "2026-10-10T13:40:00Z"  // optional: drives staleness
+}
+```
+
+- **The publisher owns judgement and formatting.** Thresholds, rounding and units
+  are decided in Node-RED (`node-red/sensors-tiles-flow.json`), not in the page.
+  That way the same tile can later drive an alert or a phone notification, and
+  the page learns no source's schema.
+- **Removing and rejecting tiles.** An empty payload removes a tile. An invalid
+  tile is dropped on its own; one bad publisher never blanks a board.
+- **At most 6 tiles.** Extras are summarised as "+N more". The first `hero` tile
+  gets the full-width row, which is how CO₂ leads the sensors board.
+- **Stale tiles stay up.** A tile older than `?stale=` minutes (default 60) is
+  kept and marked "Stale · HH:MM" instead of showing its state. A last-known
+  reading with its age is more use than a gap. The page re-checks on a 20 s
+  clock, because a sensor going quiet is exactly when no message arrives.
+- **Styling comes from `panel.css`.** The page uses the `.canvas .tiles/.tile`
+  classes, so the board and agent pages share one look. The state is always
+  shown as a word (OK / Watch / Problem), never by colour alone.
+
+A board has no gate: `activeWhen` watches a single topic, and a board is a
+wildcard. A board with no tiles shows "No readings yet". Give it `cycle: false`
+if that ever matters.

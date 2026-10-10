@@ -53,6 +53,15 @@ window.VIEWS = {
     rotate: 0,
   },
 
+  // Indoor sensors as a few large tiles. tiles.html renders whatever retained
+  // topics sit under wallpanel/tiles/<board>/; Node-RED fills this board from
+  // zigbee2mqtt (node-red/sensors-tiles-flow.json). Another board is another
+  // entry here with a different ?board=.
+  sensors: {
+    url: "tiles.html?board=sensors&title=Indoors",
+    rotate: 0,
+  },
+
   // ---- Agent canvas, two lifecycles ------------------------------------
   // One renderer, two topics. Hermes publishes to hermes/canvas/<kind>; the
   // mediator validates and republishes here. See docs/agent-canvas-schema.md.

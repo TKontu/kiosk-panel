@@ -2,8 +2,17 @@
 
 Air quality, temperature and humidity from the Zigbee sensors around the house.
 
-**Status:** not started. Mostly a rendering job - the data is already on the
-broker. Best served by the tiles renderer in `todo-view-mechanisms.md`.
+**Status:** panel side **built**. The `sensors` view (`tiles.html?board=sensors`)
+renders `wallpanel/tiles/sensors/*`, and `node-red/sensors-tiles-flow.json`
+republishes zigbee2mqtt readings there with the thresholds below. The flow
+judges each reading, so the page only renders. **Remaining:** import that flow
+on the Pi with the real friendly names in its `SENSORS` map.
+
+Follow-ups, not built:
+- **Indoor against outdoor.** Node-RED fetches the outdoor temperature
+  (Open-Meteo, the same source the overview dial uses) and publishes it as one
+  more tile.
+- **Broker ACL.** The Node-RED user needs publish rights on `wallpanel/tiles/#`.
 
 ---
 

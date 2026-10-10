@@ -23,9 +23,9 @@ several otherwise-obvious sources.
 
 ### Build this first
 
-- [ ] **[Shared view mechanisms](todo-view-mechanisms.md)** — conditional views
-      are **done**; the alert takeover and the generic tiles renderer are still
-      open. The tiles renderer alone covers two of the views below.
+- [x] **[Shared view mechanisms](todo-view-mechanisms.md)** — conditional
+      views, takeover and the generic tiles renderer (`tiles.html`,
+      `wallpanel/tiles/<board>/<key>`) are all **done**.
 
 ### Ready to build
 
@@ -33,9 +33,9 @@ several otherwise-obvious sources.
       failure. Fully designed; blocked only on installing the OctoPrint-MQTT
       plugin. *Set its base topic under `wallpanel/` or the planned broker ACL
       will silently break it.*
-- [ ] **[Indoor sensors](todo-sensors.md)** — already on the broker via
-      zigbee2mqtt; mostly a rendering job. CO₂ is the metric that changes
-      behaviour.
+- [ ] **[Indoor sensors](todo-sensors.md)** — panel side **built** (`sensors`
+      view + `node-red/sensors-tiles-flow.json`). Remaining: import the flow on
+      the Pi with the real zigbee2mqtt friendly names.
 
 ### Wants a decision or a device
 

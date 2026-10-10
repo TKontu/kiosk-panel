@@ -48,6 +48,7 @@ wall-panel/
 │   ├── photo.html              #   full-bleed still image view (media/image.jpg)
 │   ├── overview.html           #   the dial: spot price + weather on one clock
 │   ├── canvas.html             #   agent canvas; ?src= picks persistent/ephemeral
+│   ├── tiles.html              #   tiles board; ?board= picks wallpanel/tiles/<board>/+
 │   ├── media/                  #   images used by views (image.jpg — not tracked)
 │   ├── schedule.js             #   time-of-day schedule
 │   ├── app.js                  #   MQTT + schedule + override logic
@@ -56,7 +57,9 @@ wall-panel/
 └── node-red/
     ├── wallpanel-nodered-flow.json   # Zigbee remote → panel view commands
     ├── canvas-mediator-flow.json     # hermes/canvas/* → wallpanel/canvas/*
-    └── canvas-mediator-test-inject.json  # optional: click-to-test injects
+    ├── canvas-mediator-test-inject.json  # optional: click-to-test injects
+    ├── sensors-tiles-flow.json       # zigbee2mqtt sensors → wallpanel/tiles/sensors/*
+    └── tiles-test-inject.json        # optional: click-to-test tiles
 ```
 
 ## How it works (one paragraph)
@@ -103,6 +106,12 @@ You should only ever have to do this **once**. The flow maps remote buttons to
 *intents* (`next` / `prev` / `blank`) and contains no view names, so adding or
 removing views never requires re-importing it. See `architecture.md` →
 *Physical control*.
+
+**Sensors board:** import `node-red/sensors-tiles-flow.json` the same way. Before
+Deploy, edit the `SENSORS` map at the top of its function node so it lists your
+zigbee2mqtt friendly names, and only the readings worth a tile. Point its MQTT
+nodes at the authenticated broker. `tiles-test-inject.json` adds click-to-test
+tiles to the same tab.
 
 ## Operate it (MQTT cheatsheet)
 
